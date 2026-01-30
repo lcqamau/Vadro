@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import SwipeDeck from '../components/SwipeDeck';
 import client from '../api/client';
 import TripCard from '../components/TripCard';
-
+import { useNavigation } from '@react-navigation/native';
 const { width } = Dimensions.get('window');
 
 // 📏 CONFIGURATION PRÉCISE DES TAILLES
@@ -13,6 +13,8 @@ const CARD_WIDTH = width * 0.9; // La carte fait 90% de l'écran
 const SIDE_MARGIN = (width - CARD_WIDTH) / 2; // Marge exacte pour centrer
 
 const HomeScreen = () => {
+  const navigation = useNavigation();
+  const [selectedZone, setSelectedZone] = useState(null);
   const [activeTab, setActiveTab] = useState('feed');
   const [trips, setTrips] = useState([]);
   const [filteredTrips, setFilteredTrips] = useState([]);
@@ -39,6 +41,11 @@ const HomeScreen = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const goToDetails = (trip, image) => {
+    // On navigue vers l'écran 'TripDetails' en passant les infos
+    navigation.navigate('TripDetails', { trip: { ...trip, image: image } });
   };
 
   useEffect(() => {
@@ -91,7 +98,7 @@ const HomeScreen = () => {
         data={filteredTrips}
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.searchResultItem}>
+          <TouchableOpacity style={styles.searchResultItem} onPress={() => goToDetails(item, selectedZone?.image)}>
             <View>
               <Text style={styles.resultTitle}>{item.title}</Text>
               <Text style={styles.resultInfo}>{item.distanceKm} km • {item.durationDays} jours</Text>
