@@ -1,0 +1,111 @@
+// Connexion à PostgreSQL
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Générateur du client JS pour le code
+generator client {
+  provider = "prisma-client-js"
+}
+
+// --- 1. L'UTILISATEUR (L'Éclaireur) ---
+model User {
+  id          Int      @id @default(autoincrement())
+  email       String   @unique
+  username    String
+  avatarUrl   String?  // Photo de profil
+  bio         String?  // Petite description "Vanlifer amateur"
+  trustScore  Int      @default(100) // Score de fiabilité (ex: 98)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Ses contributions
+  trips       Trip[]      @relation("Author") // Les voyages qu'il a créés
+  favorites   Favorite[]  // Les voyages qu'il a likés (Swipe Droit)
+  reviews     Review[]    // Les notes qu'il a données
+}
+
+// --- 2. LE VOYAGE (L'entité principale) ---
+model Trip {
+  id           Int      @id @default(autoincrement())
+  title        String
+  description  String?
+  
+  // Indicateurs Clés
+  distanceKm   Int      @default(0)
+  durationDays Int      @default(1)
+  budgetEuro   Int      @default(0)
+  
+  // Visuel
+  imageUrl     String?  // Photo de couverture (pour le Swipe)
+  
+  // Filtres & Recherche
+  tags         String[] // Ex: ["Vanlife", "48h Chrono", "Montagne"]
+  isPublic     Boolean  @default(true)
+
+  // Gestion du Remix (L'origine du voyage)
+  originalTripId Int?   // Si c'est un remix, quel est l'ID du père ?
+  originalTrip   Trip?  @relation("RemixHistory", fields: [originalTripId], references: [id])
+  remixes        Trip[] @relation("RemixHistory") // Les enfants de ce voyage
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  authorId     Int
+  author       User     @relation("Author", fields: [authorId], references: [id])
+  
+  steps        Step[]   // Les étapes du parcours
+  reviews      Review[] // Les notes reçues
+  favorites    Favorite[] // Les likes reçus
+}
+
+// --- 3. L'ÉTAPE (Le détail du tracé GPS) ---
+model Step {
+  id          Int     @id @default(autoincrement())
+  orderIndex  Int     // Ordre : 1, 2, 3...
+  name        String  // "Plage de Nonza"
+  description String? // "Attention accès difficile"
+  
+  // Coordonnées GPS précises
+  latitude    Float
+  longitude   Float
+  
+  // Type d'étape (pour l'icône sur la carte)
+  type        String  @default("spot") // values: spot, sleep, eat, activity, start, end
+  imageUrl    String? // Photo spécifique de l'étape
+
+  tripId      Int
+  trip        Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+}
+
+// --- 4. LES FAVORIS (Le Swipe Tinder) ---
+model Favorite {
+  id        Int      @id @default(autoincrement())
+  likedAt   DateTime @default(now())
+
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  tripId    Int
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  // Un utilisateur ne peut liker qu'une seule fois un voyage
+  @@unique([userId, tripId])
+}
+
+// --- 5. LES AVIS (La Réputation) ---
+model Review {
+  id        Int      @id @default(autoincrement())
+  rating    Int      // Note de 1 à 5
+  comment   String?
+  createdAt DateTime @default(now())
+  
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  
+  tripId    Int
+  trip      Trip     @relation(fields: [tripId], references: [id])
+}
