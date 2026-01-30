@@ -1,12 +1,23 @@
 const express = require('express');
-const app = express();
+const dotenv = require('dotenv');
 const tripRoutes = require('./src/routes/tripRoutes'); // Import des routes
+const userRoutes = require('./src/routes/userRoutes');
+const { stepRouter } = require('./src/routes/stepRoutes');
+const { reviewRouter } = require('./src/routes/reviewRoutes');
+
+dotenv.config();
+
+const app = express();
 
 app.use(express.json());
 
 // --- ROUTES ---
 // Toutes les routes qui commencent par /trips iront dans tripRoutes
-app.use('/trips', tripRoutes);
+app.use('/api/trips', tripRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/steps', stepRouter);
+app.use('/api/reviews', reviewRouter);
+
 
 // Route de test simple
 app.get('/', (req, res) => {
