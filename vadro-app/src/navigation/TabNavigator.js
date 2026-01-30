@@ -8,7 +8,9 @@ import { BlurView } from 'expo-blur';
 // Import des écrans
 import HomeScreen from '../screens/HomeScreen';
 import MapScreen from '../screens/MapScreen';
+import CreateTripScreen from '../screens/CreateTripScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import FavoritesScreen from '../screens/FavoritesScreen';
 
 const { width } = Dimensions.get('window');
 
@@ -116,9 +118,10 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
 
       {/* LE BOUTON CRÉER (+) - POSITION ABSOLUE */}
       {/* Il est hors du flux, donc il ne bougera jamais */}
-      <View style={styles.absoluteCenterContainer} pointerEvents="box-none">
+     <View style={styles.absoluteCenterContainer} pointerEvents="box-none">
         <TouchableOpacity
-          onPress={() => navigation.navigate('Create')}
+          // 👇 C'EST ICI QU'ON CHANGE LA DESTINATION
+          onPress={() => navigation.navigate('CreateTrip')} 
           style={styles.centerButton}
           activeOpacity={0.9}
         >
@@ -144,8 +147,8 @@ const TabNavigator = () => {
       {/* L'ordre ici n'a plus d'importance visuelle car on trie manuellement */}
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Map" component={MapScreen} />
-      <Tab.Screen name="Create" component={ProfileScreen} /> 
-      <Tab.Screen name="Favorites" component={ProfileScreen} />
+      <Tab.Screen name="Create" component={CreateTripScreen} /> 
+      <Tab.Screen name="Favorites" component={FavoritesScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );
