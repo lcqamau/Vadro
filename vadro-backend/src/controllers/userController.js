@@ -155,6 +155,8 @@ const getUserById = async (req, res) => {
       select: {
         id: true,
         username: true,
+        email: true,
+        password: true,
         avatarUrl: true,
         bio: true,
         trustScore: true,
@@ -174,6 +176,37 @@ const getUserById = async (req, res) => {
   }
 };
 
+// @desc    Mettre à jour le profil utilisateur (Avatar, Bio, Username)
+// @route   PUT /api/users/profile
+// @access  Private
+const updateUserProfile = async (req, res) => {
+  const userId = req.user.id; // Récupéré par ton authMiddleware
+  const { username, bio, avatarUrl } = req.body;
+
+  try {
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        username: username || undefined, // On met à jour seulement si présent
+        bio: bio || undefined,
+        avatarUrl: avatarUrl || undefined,
+      },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        avatarUrl: true,
+        bio: true,
+        trustScore: true,
+      }
+    });
+
+    res.json(updatedUser);
+  } catch (error) {
+    res.status(500).json({ message: "Erreur lors de la mise à jour du profil", details: error.message });
+  }
+};
+
 // Generate JWT
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -187,4 +220,5 @@ module.exports = {
   getUserProfile,
   getUsers,
   getUserById,
+  updateUserProfile,
 };

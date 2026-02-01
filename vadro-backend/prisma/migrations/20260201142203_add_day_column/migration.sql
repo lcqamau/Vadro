@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Step" ADD COLUMN     "day" INTEGER NOT NULL DEFAULT 0;

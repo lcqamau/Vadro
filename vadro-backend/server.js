@@ -4,6 +4,7 @@ const tripRoutes = require('./src/routes/tripRoutes'); // Import des routes
 const userRoutes = require('./src/routes/userRoutes');
 const { stepRouter } = require('./src/routes/stepRoutes');
 const { reviewRouter } = require('./src/routes/reviewRoutes');
+const favoriteRoutes = require('./src/routes/favoriteRoutes');
 
 dotenv.config();
 
@@ -17,6 +18,7 @@ app.use('/api/trips', tripRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/steps', stepRouter);
 app.use('/api/reviews', reviewRouter);
+app.use('/api/favorites', favoriteRoutes);
 
 
 // Route de test simple

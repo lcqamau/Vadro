@@ -1,118 +1,220 @@
-import React, { useState } from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, Dimensions } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity, FlatList } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import client from '../api/client';
+import { useNavigation } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics'; // Vibration (si installé)
+import apiClient from '../api/client'; // Ton client configuré
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
-// 📏 TAILLE EXACTE DE LA CARTE (Doit correspondre aux calculs du HomeScreen)
-const CARD_WIDTH = width * 0.9;
-const CARD_HEIGHT = height * 0.65;
+// --- RÉGLAGES DIMENSIONS CARRÉES ---
+const CARD_MARGIN = 0; // Si tu veux coller aux bords ou mettre 20
+const CARD_WIDTH = width - (CARD_MARGIN * 2); 
+const IMAGE_HEIGHT = CARD_WIDTH; 
 
 const TripCard = ({ trip }) => {
   const navigation = useNavigation();
-  const [loading, setLoading] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const flatListRef = useRef(null);
 
-  const handleRemix = async () => {
-    setLoading(true);
+  // Initialisation de l'état local avec la prop
+  const [isFavorite, setIsFavorite] = useState(trip.likedAt ? true : false);
+
+  // --- 1. LE FIX DE SYNCHRONISATION ---
+  // C'est ici que la magie opère : quand la Home rafraîchit les données,
+  // ce useEffect force la mise à jour du cœur sur la carte.
+  useEffect(() => {
+    if (trip.likedAt !== undefined) {
+      setIsFavorite(trip.likedAt ? true : false);
+    }
+  }, [trip.likedAt]); // On surveille le changement de cette donnée précise
+
+  // --- 2. FONCTION TOGGLE (Nettoyée) ---
+  const handleToggleFavorite = async () => {
+    // Vibration (Optionnel)
+    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch (e) {}
+
+    // UI Optimiste
+    const previousState = isFavorite;
+    setIsFavorite(!isFavorite); 
+
     try {
-      const response = await client.post(`/trips/${trip.id}/remix`, { newAuthorId: 1 });
-      if (response.data.success) {
-        Alert.alert("🔥 Voyage ajouté !", "Prêt à le personnaliser ?", [
-          { text: "C'est parti", onPress: () => navigation.navigate('MapScreen', { tripId: response.data.remix.id }) }
-        ]);
-      }
+      // Appel API simplifié (le client gère le token tout seul)
+      await apiClient.post(`/favorites/${trip.id}` ,  {}, {
+        headers: { Authorization: `Bearer ${await AsyncStorage.getItem('userToken')}` }
+      });
+      
     } catch (error) {
-      Alert.alert("Erreur", "Impossible de remixer.");
-    } finally {
-      setLoading(false);
+      console.error("Erreur Like/Dislike :", error);
+      // Rollback en cas d'erreur
+      setIsFavorite(previousState);
     }
   };
 
+  // --- GESTION IMAGES ---
+  const images = (trip.images && trip.images.length > 0) 
+    ? trip.images 
+    : [trip.imageUrl || 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1'];
+
+  const onViewableItemsChanged = useCallback(({ viewableItems }) => {
+    if (viewableItems.length > 0) {
+      setActiveIndex(viewableItems[0].index || 0);
+    }
+  }, []);
+
+  const viewabilityConfig = { itemVisiblePercentThreshold: 50 };
+
+  const handlePress = () => navigation.navigate('TripDetails', { trip });
+
   return (
-    // PLUS DE MARGIN ICI, C'EST GÉRÉ PAR LE SWIPER
-    <View style={styles.card}>
+    <View style={styles.container}>
       
-      {/* IMAGE (72%) */}
-      <View style={styles.imageContainer}>
-        <Image 
-          source={{ uri: trip.imageUrl || 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800' }} 
-          style={styles.image} 
-        />
-        <View style={styles.tagBadge}>
-          <Text style={styles.tagText}>{trip.tags?.[0] || 'Roadtrip'}</Text>
-        </View>
-      </View>
-
-      {/* INFOS (28%) */}
-      <View style={styles.infoContainer}>
-        <View style={styles.textRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.title} numberOfLines={1}>{trip.title}</Text>
-            <Text style={styles.subtitle}>{trip.distanceKm} km • {trip.durationDays} j • {trip.budgetEuro}€</Text>
-          </View>
-          <View style={styles.likeButton}>
-              <Ionicons name="heart" size={22} color="#FF3B30" />
-          </View>
-        </View>
-
-        <TouchableOpacity style={styles.actionButton} onPress={handleRemix} disabled={loading}>
-          {loading ? (
-            <ActivityIndicator color="#FFF" size="small" />
-          ) : (
-            <>
-              <Text style={styles.actionText}>Remixer</Text>
-              <Ionicons name="arrow-forward" size={18} color="#FFF" />
-            </>
+      {/* 1. CAROUSEL FORMAT CARRÉ */}
+      <View style={styles.imageWrapper}>
+        <FlatList
+          ref={flatListRef}
+          data={images}
+          horizontal
+          pagingEnabled
+          decelerationRate="fast" 
+          showsHorizontalScrollIndicator={false}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
+          scrollEventThrottle={16}
+          keyExtractor={(_, index) => index.toString()}
+          renderItem={({ item }) => (
+            <TouchableOpacity activeOpacity={1} onPress={handlePress}>
+              <Image 
+                source={{ uri: item }} 
+                contentFit="cover" 
+                transition={300}
+                style={styles.image} 
+              />
+            </TouchableOpacity>
           )}
+        />
+
+        {/* Dégradé bas */}
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.5)']}
+          style={styles.gradient}
+        />
+
+        {/* Bouton Like */}
+        <TouchableOpacity 
+          style={styles.likeButton}
+          onPress={handleToggleFavorite}
+          activeOpacity={0.7}
+          hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
+        >
+          <Ionicons 
+            name={isFavorite ? "heart" : "heart-outline"} 
+            size={24} 
+            color={isFavorite ? "#FF3B30" : "#fff"} 
+          />
         </TouchableOpacity>
+
+        {/* Pagination Dots */}
+        {images.length > 1 && (
+          <View style={styles.pagination}>
+            {images.map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.dot,
+                  index === activeIndex ? styles.dotActive : styles.dotInactive
+                ]}
+              />
+            ))}
+          </View>
+        )}
       </View>
+
+      {/* 2. INFO SECTION */}
+      <TouchableOpacity activeOpacity={0.9} onPress={handlePress} style={styles.infoContainer}>
+        <View style={styles.topRow}>
+          <Text style={styles.title} numberOfLines={1}>{trip.title}</Text>
+          <View style={styles.ratingBadge}>
+            <Ionicons name="star" size={12} color="#1A1A1A" />
+            <Text style={styles.ratingText}>{trip.rating || "4.8"}</Text>
+          </View>
+        </View>
+
+        <Text style={styles.subtitle}>
+          {trip.durationDays} jours • {trip.tags?.[0] || 'Voyage'}
+        </Text>
+
+        <View style={styles.priceContainer}>
+          <Text style={styles.priceLabel}>dès </Text>
+          <Text style={styles.priceValue}>{trip.budgetEuro} €</Text>
+          <Text style={styles.priceLabel}> / pers</Text>
+        </View>
+      </TouchableOpacity>
+
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  card: {
-    width: CARD_WIDTH,
-    height: CARD_HEIGHT,
+  container: {
+    backgroundColor: '#fff',
     borderRadius: 24,
-    backgroundColor: '#FFFFFF',
-    // Ombre douce
+    marginBottom: 25, 
+    // Si tu avais mis des marges sur CARD_WIDTH, il faut les gérer ici ou dans le parent
+    // marginHorizontal: CARD_MARGIN, 
+    
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    elevation: 5,
-    overflow: 'visible', // Important pour l'ombre sur iOS
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 15,
+    elevation: 6,
   },
-  imageContainer: {
-    flex: 0.72,
+
+  imageWrapper: {
+    height: IMAGE_HEIGHT, 
+    width: '100%',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#F0F0F0'
   },
-  image: { width: '100%', height: '100%', resizeMode: 'cover' },
-  tagBadge: {
-    position: 'absolute', top: 15, left: 15,
-    backgroundColor: 'rgba(255,255,255,0.9)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8,
-  },
-  tagText: { fontWeight: '800', fontSize: 11, textTransform: 'uppercase', color: '#000' },
+  image: { width: CARD_WIDTH, height: IMAGE_HEIGHT },
   
-  infoContainer: {
-    flex: 0.28, padding: 18, justifyContent: 'space-between',
+  gradient: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 80 },
+
+  likeButton: {
+    position: 'absolute', top: 12, right: 12,
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.2)', 
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)'
   },
-  textRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  title: { fontSize: 20, fontWeight: '800', color: '#1A1A1A', marginBottom: 4 },
-  subtitle: { fontSize: 13, color: '#8E8E93', fontWeight: '500' },
-  
-  likeButton: { padding: 8, backgroundColor: '#FFF0F0', borderRadius: 50, marginLeft: 10 },
-  
-  actionButton: {
-    backgroundColor: '#00D668', flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
-    paddingVertical: 12, borderRadius: 14, gap: 8,
+
+  pagination: {
+    position: 'absolute', bottom: 12, width: '100%',
+    flexDirection: 'row', justifyContent: 'center', gap: 6
   },
-  actionText: { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
+  dot: { borderRadius: 3 },
+  dotActive: { width: 8, height: 8, backgroundColor: '#fff' },
+  dotInactive: { width: 6, height: 6, backgroundColor: 'rgba(255,255,255,0.6)' },
+
+  infoContainer: { padding: 18, paddingBottom: 22 },
+  
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  title: { fontSize: 20, fontWeight: '800', color: '#1A1A1A', flex: 1, marginRight: 10, letterSpacing: -0.5 },
+  
+  ratingBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F7F7F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  ratingText: { fontSize: 13, fontWeight: '700', color: '#1A1A1A' },
+
+  subtitle: { fontSize: 14, color: '#8E8E93', fontWeight: '500', marginBottom: 16 },
+
+  priceContainer: { flexDirection: 'row', alignItems: 'baseline', alignSelf: 'flex-end' },
+  priceLabel: { fontSize: 13, color: '#8E8E93', fontWeight: '500' },
+  priceValue: { fontSize: 22, fontWeight: '900', color: '#1A1A1A' }
 });
 
 export default TripCard;

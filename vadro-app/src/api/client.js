@@ -1,17 +1,17 @@
 import axios from 'axios';
+import * as SecureStore from 'expo-secure-store';
 
-// ⚠️ Vérifie qu'il n'y a pas d'espace à la fin de l'IP
-const SERVER_IP = '192.168.1.48'; // Remets ton IP ici
-
-const client = axios.create({
-  baseURL: `http://${SERVER_IP}:3000`,
-  timeout: 5000,
+const apiClient = axios.create({
+  baseURL: 'http://192.168.1.48:3000/api', // Mets ton IP locale ici
 });
 
-// AJOUTE CECI : Le mouchard qui va afficher l'URL dans ton terminal
-client.interceptors.request.use((request) => {
-  console.log('>>> REQUÊTE ENVOYÉE VERS :', request.baseURL + request.url);
-  return request;
+// L'INTERCEPTEUR : C'est lui qui ajoute le Token automatiquement
+apiClient.interceptors.request.use(async (config) => {
+  const token = await SecureStore.getItemAsync('authToken');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
-export default client;
+export default apiClient;

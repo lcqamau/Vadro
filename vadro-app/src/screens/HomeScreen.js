@@ -1,204 +1,333 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, TextInput, Dimensions, StatusBar, Image } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useEffect, useState, useMemo, useCallback} from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { View, Text, FlatList, StyleSheet, TextInput, TouchableOpacity, StatusBar, ActivityIndicator, Keyboard, RefreshControl, Dimensions } from 'react-native';
+import { Image } from 'expo-image'; 
+import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import SwipeDeck from '../components/SwipeDeck';
+import { LinearGradient } from 'expo-linear-gradient'; // Assure-toi d'avoir installé expo-linear-gradient
+
 import client from '../api/client';
 import TripCard from '../components/TripCard';
-import { useNavigation } from '@react-navigation/native';
-const { width } = Dimensions.get('window');
 
-// 📏 CONFIGURATION PRÉCISE DES TAILLES
-const CARD_WIDTH = width * 0.9; // La carte fait 90% de l'écran
-const SIDE_MARGIN = (width - CARD_WIDTH) / 2; // Marge exacte pour centrer
+const { width } = Dimensions.get('window');
+const TAGS = ["Tout", "Plage", "Montagne", "Ville", "Europe", "Asie", "Pas cher", "Luxe", "Aventure"];
 
 const HomeScreen = () => {
   const navigation = useNavigation();
-  const [selectedZone, setSelectedZone] = useState(null);
-  const [activeTab, setActiveTab] = useState('feed');
+  
+  // --- DONNÉES ---
   const [trips, setTrips] = useState([]);
-  const [filteredTrips, setFilteredTrips] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
-  const swiperRef = useRef(null);
+  const [refreshing, setRefreshing] = useState(false); // État pour le pull-to-refresh
+  
+  // --- RECHERCHE & FILTRES ---
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTag, setSelectedTag] = useState("Tout");
+  const [showFilters, setShowFilters] = useState(false);
+  
 
-  const COLORS = {
-    background: '#FAFAFA',
-    green: '#00D668',
-    textDark: '#1A1A1A',
-    textGrey: '#8E8E93',
-    inputBg: '#F2F2F7',
-    red: '#FF3B30',
-  };
-
+  // --- CHARGEMENT DES VOYAGES ---
   const fetchTrips = async () => {
     try {
       const response = await client.get('/trips');
-      setTrips(response.data);
-      setFilteredTrips(response.data);
+      // On mélange un peu pour la démo, ou on trie par date
+      setTrips(response.data.sort(() => 0.5 - Math.random()));
     } catch (error) {
-      console.error(error);
+      console.error("Erreur fetch trips:", error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const goToDetails = (trip, image) => {
-    // On navigue vers l'écran 'TripDetails' en passant les infos
-    navigation.navigate('TripDetails', { trip: { ...trip, image: image } });
-  };
+  useFocusEffect(
+    useCallback(() => {
+      fetchTrips();
+    }, []));
 
-  useEffect(() => {
+  // Fonction appelée quand on tire vers le bas
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
     fetchTrips();
   }, []);
 
-  const handleSearch = (text) => {
-    setSearchQuery(text);
-    if (text) {
-      const newData = trips.filter(item => 
-        item.title?.toUpperCase().includes(text.toUpperCase())
-      );
-      setFilteredTrips(newData);
-    } else {
-      setFilteredTrips(trips);
-    }
+  // --- FILTRAGE INTELLIGENT ---
+  const displayData = useMemo(() => {
+      let filtered = trips;
+
+      // 1. Tag
+      if (selectedTag && selectedTag !== "Tout") {
+        const tagRecherche = selectedTag.toLowerCase();
+        filtered = filtered.filter(trip => 
+          trip.tags && Array.isArray(trip.tags) && 
+          trip.tags.some(t => t.toLowerCase() === tagRecherche)
+        );
+      }
+
+      // 2. Recherche Texte
+      if (searchQuery.length > 0) {
+        const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() : "";
+        const query = normalize(searchQuery);
+
+        filtered = filtered.filter(trip => {
+          const titleMatch = normalize(trip.title).includes(query);
+          const descMatch = trip.description ? normalize(trip.description).includes(query) : false;
+          const tagMatch = trip.tags ? trip.tags.some(tag => normalize(tag).includes(query)) : false;
+          return titleMatch || descMatch || tagMatch;
+        });
+      }
+
+      return filtered;
+  }, [trips, searchQuery, selectedTag]);
+
+  // --- COMPOSANT : HEADER DE LA LISTE (Featured Section) ---
+  const ListHeader = () => {
+    // On prend les 3 premiers comme "Featured" pour l'exemple
+    const featuredTrips = trips.slice(0, 3); 
+
+    return (
+      <View>
+        {/* Espace pour ne pas être caché par le Header Flottant */}
+        <View style={{ height: showFilters ? 230 : 180 }} />
+
+        {/* SECTION À LA UNE (Visible seulement si pas de recherche active) */}
+        {searchQuery === '' && selectedTag === 'Tout' && featuredTrips.length > 0 && (
+          <View style={styles.featuredSection}>
+            <Text style={styles.sectionTitle}>🔥 Tendances du moment</Text>
+            <FlatList
+              horizontal
+              data={featuredTrips}
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(item) => `featured-${item.id}`}
+              contentContainerStyle={{ paddingLeft: 20, paddingRight: 10 }}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
+                  style={styles.featuredCard}
+                  onPress={() => navigation.navigate('TripDetails', { trip: item })}
+                  activeOpacity={0.9}
+                >
+                  <Image source={{ uri: item.imageUrl }} style={styles.featuredImage} />
+                  <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.featuredOverlay} />
+                  <View style={styles.featuredContent}>
+                    <Text style={styles.featuredTag}>{item.tags?.[0]?.toUpperCase()}</Text>
+                    <Text style={styles.featuredTitle} numberOfLines={2}>{item.title}</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        )}
+
+        <Text style={[styles.sectionTitle, { marginLeft: 20, marginTop: 10 }]}>
+          {searchQuery || selectedTag !== 'Tout' ? 'Résultats' : 'Explorer le monde 🌍'}
+        </Text>
+      </View>
+    );
   };
 
-  // --- RENDU FEED (SWIPE) ---
-    const renderFeed = () => {
-        if (trips.length === 0) return <Text style={styles.emptyText}>Plus de voyages !</Text>;
-
-        return (
-        <View style={styles.swiperContainer}>
-            <SwipeDeck
-            data={trips}
-            renderCard={(item) => <TripCard trip={item} />}
-            onSwipeRight={(item) => console.log('Like', item.title)}
-            onSwipeLeft={(item) => console.log('Pass', item.title)}
-            />
-        </View>
-        );
-    };
-
-  // --- RENDU RECHERCHE ---
-  const renderSearch = () => (
-    <View style={styles.searchContainer}>
-      <View style={[styles.searchBar, { backgroundColor: COLORS.inputBg }]}>
-        <Ionicons name="search" size={20} color={COLORS.textGrey} />
-        <TextInput
-          style={[styles.searchInput, { color: COLORS.textDark }]}
-          placeholder="Où veux-tu partir ?"
-          placeholderTextColor={COLORS.textGrey}
-          value={searchQuery}
-          onChangeText={handleSearch}
-        />
+  const renderFooter = () => {
+    if (displayData.length === 0) return null;
+    return (
+      <View style={styles.footer}>
+        <Ionicons name="checkmark-circle-outline" size={24} color="#00D668" />
+        <Text style={styles.footerText}>Vous avez tout vu !</Text>
       </View>
+    );
+  };
 
-      <FlatList
-        data={filteredTrips}
-        keyExtractor={(item) => item.id.toString()}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.searchResultItem} onPress={() => goToDetails(item, selectedZone?.image)}>
-            <View>
-              <Text style={styles.resultTitle}>{item.title}</Text>
-              <Text style={styles.resultInfo}>{item.distanceKm} km • {item.durationDays} jours</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textGrey} />
-          </TouchableOpacity>
-        )}
-      />
-    </View>
-  );
-
-  if (loading) return <ActivityIndicator size="large" color={COLORS.green} style={styles.center} />;
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#00D668" />
+        <Text style={{ marginTop: 10, color: '#8E8E93' }}>Chargement de l'aventure...</Text>
+      </View>
+    );
+  }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
 
-      {/* 1. LE HEADER AVEC LE LOGO */}
-      <View style={styles.topHeader}>
-        <Text style={styles.logoText}>VADRO</Text>
-        <TouchableOpacity style={styles.profileButton}>
-            {/* Petit avatar ou icône profil */}
-            <Ionicons name="person-circle-outline" size={34} color="#1A1A1A" />
-        </TouchableOpacity>
+      {/* --- HEADER FLOTTANT (Fixe en haut) --- */}
+      <View style={styles.floatingHeader}>
+        
+        {/* Ligne 1 : Salutation & Avatar */}
+        <View style={styles.topRow}>
+          <View>
+             <Text style={styles.greeting}>VADRO</Text>
+             <Text style={styles.subtitle}>Prêt pour votre prochaine évasion ?</Text>
+          </View>
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('Main', { screen: 'Profile' })}
+            style={styles.avatarContainer}
+          >
+            <Image 
+              source={{ uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde' }} 
+              style={styles.avatar} 
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* Ligne 2 : Recherche & Filtre Toggle */}
+        <View style={styles.searchRow}>
+          <View style={styles.searchBarContainer}>
+            <Ionicons name="search" size={20} color="#1A1A1A" style={{ marginRight: 10 }} />
+            <TextInput 
+              style={styles.searchInput}
+              placeholder="Où souhaitez-vous aller ?"
+              placeholderTextColor="#8E8E93"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => { setSearchQuery(''); Keyboard.dismiss(); }}>
+                <Ionicons name="close-circle" size={20} color="#8E8E93" />
+              </TouchableOpacity>
+            )}
+          </View>
+          
+          <TouchableOpacity 
+            style={[styles.filterButton, showFilters && styles.filterButtonActive]} 
+            onPress={() => setShowFilters(!showFilters)}
+          >
+             <Ionicons name="options-outline" size={22} color={showFilters ? "#fff" : "#1A1A1A"} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Ligne 3 : Tags (Conditionnel) */}
+        {showFilters && (
+          <View style={styles.tagsContainer}>
+            <FlatList 
+              horizontal
+              data={TAGS}
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(item) => item}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
+                  style={[styles.tagChip, selectedTag === item && styles.tagChipActive]}
+                  onPress={() => setSelectedTag(item)}
+                >
+                  <Text style={[styles.tagText, selectedTag === item && styles.tagTextActive]}>
+                    {item}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        )}
       </View>
 
-      {/* 2. LES ONGLETS */}
-      <View style={styles.tabsContainer}>
-        <TouchableOpacity onPress={() => setActiveTab('feed')} style={styles.tabButton}>
-          <Text style={[styles.tabText, activeTab === 'feed' && styles.activeTabText]}>Inspiration</Text>
-          {activeTab === 'feed' && <View style={styles.activeDot} />}
-        </TouchableOpacity>
-
-        <View style={styles.divider} />
-
-        <TouchableOpacity onPress={() => setActiveTab('search')} style={styles.tabButton}>
-          <Text style={[styles.tabText, activeTab === 'search' && styles.activeTabText]}>Recherche</Text>
-          {activeTab === 'search' && <View style={styles.activeDot} />}
-        </TouchableOpacity>
-      </View>
-
-      {/* 3. LE CONTENU */}
+      {/* --- LISTE PRINCIPALE --- */}
       <View style={styles.content}>
-        {activeTab === 'feed' ? renderFeed() : renderSearch()}
+        <FlatList
+          data={displayData}
+          keyExtractor={(item) => item.id.toString()}
+          
+          // On utilise notre nouveau Header riche
+          ListHeaderComponent={ListHeader}
+          ListFooterComponent={renderFooter}
+          
+          // PULL TO REFRESH
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00D668" />
+          }
+          
+          renderItem={({ item }) => (
+            <View style={styles.cardWrapper}>
+              <TripCard trip={item} />
+            </View>
+          )}
+          
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 40 }}
+          
+          // Empty State amélioré
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="airplane-outline" size={60} color="#E5E5EA" />
+              <Text style={styles.emptyTitle}>Aucun voyage trouvé</Text>
+              <Text style={styles.emptyText}>Essayez de modifier vos filtres.</Text>
+              <TouchableOpacity onPress={() => { setSelectedTag("Tout"); setSearchQuery(""); }} style={styles.resetButton}>
+                <Text style={styles.resetButtonText}>Tout afficher</Text>
+              </TouchableOpacity>
+            </View>
+          }
+        />
       </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FAFAFA' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FAFAFA' },
+
+  // --- HEADER FLOTTANT ---
+  floatingHeader: {
+    position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100,
+    backgroundColor: 'rgba(250,250,250,0.96)', // Effet semi-transparent
+    paddingTop: 55, paddingBottom: 15, paddingHorizontal: 20,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.03)',
+  },
   
-  // NOUVEAU HEADER
-  topHeader: {
-    paddingHorizontal: 25,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FAFAFA',
-  },
-  logoText: {
-    fontFamily: 'Roboto', // Ou ta police par défaut
-    fontSize: 28,
-    fontWeight: '900',
-    color: '#1A1A1A',
-    letterSpacing: -1,
-  },
+  // Identité
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
+  greeting: { fontSize: 24, fontWeight: '900', color: '#1A1A1A', letterSpacing: -0.5 },
+  subtitle: { fontSize: 13, color: '#8E8E93', fontWeight: '500', marginTop: 2 },
+  
+  avatarContainer: { shadowColor: "#000", shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.1, shadowRadius: 5, elevation: 5 },
+  avatar: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: '#fff' },
 
-  // TABS
-  tabsContainer: { 
-    flexDirection: 'row', 
-    justifyContent: 'center', 
-    paddingBottom: 10, 
-    backgroundColor: '#FAFAFA',
-    zIndex: 10 
+  // Recherche
+  searchRow: { flexDirection: 'row', alignItems: 'center' },
+  searchBarContainer: {
+    flex: 1, flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#fff', borderRadius: 16, paddingHorizontal: 15, paddingVertical: 12,
+    borderWidth: 1, borderColor: '#F2F2F7',
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 5, elevation: 1,
   },
-  tabButton: { paddingHorizontal: 25, alignItems: 'center' },
-  tabText: { fontSize: 16, fontWeight: '600', color: '#C7C7CC' },
-  activeTabText: { color: '#1A1A1A', fontWeight: 'bold' },
-  activeDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#00D668', marginTop: 4 },
-  divider: { width: 1, height: 15, backgroundColor: '#E5E5EA', marginHorizontal: 5, alignSelf: 'center' },
+  searchInput: { flex: 1, fontSize: 15, color: '#1A1A1A', fontWeight: '500' },
+  
+  filterButton: {
+    width: 48, height: 48, borderRadius: 16,
+    backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center',
+    marginLeft: 12, borderWidth: 1, borderColor: '#F2F2F7',
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
+  },
+  filterButtonActive: { backgroundColor: '#1A1A1A', borderColor: '#1A1A1A' },
 
+  // Tags
+  tagsContainer: { marginTop: 15 },
+  tagChip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 25, backgroundColor: '#F2F2F7', marginRight: 8 },
+  tagChipActive: { backgroundColor: '#1A1A1A' },
+  tagText: { color: '#666', fontWeight: '600', fontSize: 13 },
+  tagTextActive: { color: '#fff' },
+
+  // --- SECTION "À LA UNE" ---
+  featuredSection: { marginBottom: 25, marginTop: 10 },
+  sectionTitle: { fontSize: 20, fontWeight: '800', color: '#1A1A1A', marginBottom: 15, marginLeft: 20 },
+  featuredCard: {
+    width: 200, height: 250, borderRadius: 20, marginRight: 15,
+    overflow: 'hidden', backgroundColor: '#F0F0F0',
+  },
+  featuredImage: { width: '100%', height: '100%' },
+  featuredOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 120 },
+  featuredContent: { position: 'absolute', bottom: 15, left: 15, right: 15 },
+  featuredTag: { color: '#00D668', fontSize: 10, fontWeight: 'bold', marginBottom: 4 },
+  featuredTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', lineHeight: 22 },
+
+  // --- LISTE ---
   content: { flex: 1 },
-  // Container Swiper : margin negative pour remonter un peu si besoin
-  swiperContainer: { flex: 1, marginTop: 20},
-  emptyText: { textAlign: 'center', marginTop: 100, fontSize: 18, color: '#8E8E93' },
+  cardWrapper: { paddingHorizontal: 20, marginBottom: 5 }, // Marge gérée par la TripCard maintenant
+  footer: { alignItems: 'center', marginTop: 10, marginBottom: 20, opacity: 0.5 },
+  footerText: { color: '#8E8E93', marginTop: 5, fontWeight: '500' },
 
-  // RECHERCHE
-  searchContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 10 },
-  searchBar: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 15, paddingVertical: 14, marginBottom: 20 },
-  searchInput: { flex: 1, marginLeft: 10, fontSize: 16, fontWeight: '500' },
-  searchResultItem: {
-    backgroundColor: '#FFFFFF', padding: 16, borderRadius: 16, marginBottom: 12,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 2
-  },
-  resultTitle: { color: '#1A1A1A', fontWeight: 'bold', fontSize: 16 },
-  resultInfo: { color: '#8E8E93', fontSize: 13, marginTop: 4 },
+  // Empty
+  emptyContainer: { alignItems: 'center', marginTop: 60, paddingHorizontal: 40 },
+  emptyTitle: { fontSize: 20, fontWeight: 'bold', color: '#1A1A1A', marginTop: 20, marginBottom: 10 },
+  emptyText: { color: '#8E8E93', fontSize: 15, textAlign: 'center', marginBottom: 25, lineHeight: 22 },
+  resetButton: { paddingHorizontal: 25, paddingVertical: 14, backgroundColor: '#1A1A1A', borderRadius: 25 },
+  resetButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 15 }
 });
 
 export default HomeScreen;

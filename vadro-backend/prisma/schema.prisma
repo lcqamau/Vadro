@@ -71,11 +71,12 @@ model Trip {
 model Step {
   id          Int      @id @default(autoincrement())
   orderIndex  Int
-  name        String
+  title        String
+  day         Int      @default(0)
   description String?
   
-  latitude    Float
-  longitude   Float
+  latitude    Float?
+  longitude   Float?
   
   // +++ AMÉLIORATION : Utilisation de l'Enum StepType +++
   type        StepType @default(spot)

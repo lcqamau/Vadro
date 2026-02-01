@@ -1,22 +1,42 @@
 // src/screens/SignupScreen.js
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage'; // Pour stocker le token
+import apiClient from '../api/client';
 
 const SignupScreen = ({ navigation }) => {
-  const [name, setName] = useState('');
+  const [name, setName] = useState(''); // Utilisé comme username
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSignup = () => {
+  const handleSignup = async () => {
+    if (!name || !email || !password) {
+      return Alert.alert("Erreur", "Veuillez remplir tous les champs.");
+    }
+
     setLoading(true);
-    setTimeout(() => {
+    try {
+      // Appel vers ton contrôleur registerUser
+      const response = await apiClient.post('/users/register', {
+        username: name,
+        email: email,
+        password: password
+      });
+
+      if (response.data.token) {
+        // Sauvegarde du token JWT généré
+        await AsyncStorage.setItem('userToken', response.data.token);
+        navigation.replace('Main');
+      }
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || "Une erreur est survenue lors de l'inscription.";
+      Alert.alert("Erreur d'inscription", errorMsg);
+    } finally {
       setLoading(false);
-      // Après inscription, on va directement à l'accueil (ou vers un onboarding profile)
-      navigation.replace('Main');
-    }, 1500);
+    }
   };
 
   return (

@@ -1,8 +1,10 @@
 // src/screens/LoginScreen.js
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import apiClient from '../api/client';
 
 const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
@@ -10,14 +12,30 @@ const LoginScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
   const [secureText, setSecureText] = useState(true);
 
-  const handleLogin = () => {
-    // Simulation de connexion
+  const handleLogin = async () => {
+    if (!email || !password) {
+      return Alert.alert("Champs manquants", "Merci de saisir ton email et ton mot de passe.");
+    }
+
     setLoading(true);
-    setTimeout(() => {
+    try {
+      // Appel vers ton contrôleur loginUser
+      const response = await apiClient.post('/users/login', {
+        email: email,
+        password: password
+      });
+
+      if (response.data.token) {
+        // On stocke le token pour authMiddleware.js
+        await AsyncStorage.setItem('userToken', response.data.token);
+        navigation.replace('Main');
+      }
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || "Identifiants invalides.";
+      Alert.alert("Échec de connexion", errorMsg);
+    } finally {
       setLoading(false);
-      // On remplace la navigation pour ne pas pouvoir revenir à la page login
-      navigation.replace('Main');
-    }, 1500);
+    }
   };
 
   return (
