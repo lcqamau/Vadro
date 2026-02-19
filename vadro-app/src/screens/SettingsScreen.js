@@ -4,7 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const SettingsScreen = ({ navigation }) => {
+const SettingsScreen = ({ navigation, route }) => {
+  const { user } = route.params || {};
   
   const handleLogout = () => {
     Alert.alert("Déconnexion", "Voulez-vous vraiment vous déconnecter ?", [
@@ -38,18 +39,22 @@ const SettingsScreen = ({ navigation }) => {
         <Text style={styles.headerTitle}>Paramètres</Text>
         <View style={{ width: 24 }} />
       </View>
-
+      
       <ScrollView style={styles.content}>
         <Text style={styles.sectionTitle}>Compte</Text>
-        <SettingItem icon="person-outline" title="Informations personnelles" onPress={() => {}} />
-        <SettingItem icon="lock-closed-outline" title="Sécurité et mot de passe" onPress={() => {}} />
-        <SettingItem icon="notifications-outline" title="Notifications" onPress={() => {}} />
+        <SettingItem 
+            icon="person-outline" 
+            title="Informations personnelles" 
+            onPress={() => navigation.navigate('EditProfile', { user })} 
+        />
+        <SettingItem icon="lock-closed-outline" title="Sécurité et mot de passe" onPress={() => navigation.navigate('Security')} />
+        <SettingItem icon="notifications-outline" title="Notifications" onPress={() => navigation.navigate('Notifications')} />
         
         <Text style={styles.sectionTitle}>Vadro Pro</Text>
-        <SettingItem icon="briefcase-outline" title="Mes investissements" onPress={() => {}} />
+        <SettingItem icon="briefcase-outline" title="Mes investissements" onPress={() => navigation.navigate('Investments')} />
 
         <Text style={styles.sectionTitle}>Plus</Text>
-        <SettingItem icon="help-circle-outline" title="Aide & Support" onPress={() => {}} />
+        <SettingItem icon="help-circle-outline" title="Aide & Support" onPress={() => navigation.navigate('Support')} />
         <SettingItem icon="log-out-outline" title="Déconnexion" onPress={handleLogout} color="#FF3B30" />
       </ScrollView>
     </SafeAreaView>

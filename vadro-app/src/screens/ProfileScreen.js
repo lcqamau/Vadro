@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, StatusBar, Dimensions, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiClient from '../api/client';
 import { Image } from 'expo-image';
@@ -10,39 +10,51 @@ import * as ImagePicker from 'expo-image-picker';
 
 const { width } = Dimensions.get('window');
 
-const ProfileScreen = () => {
+const ProfileScreen = ({ route }) => {
   const navigation = useNavigation();
+  const params = route?.params || {};
+  const targetUser = params.user; // L'utilisateur cible (si on visite un profil)
+  const isMe = !targetUser; // Si pas de targetUser, c'est mon profil
+  
   const [activeTab, setActiveTab] = useState('projects');
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(targetUser || null); // On initialise avec les données passées
   const [trips, setTrips] = useState([]);
   const [loading, setLoading] = useState(true);
-  const avatarUri = user?.avatarUrl || `https://ui-avatars.com/api/?name=${user?.username}&background=00D668&color=fff`;
+  const avatarUri = user?.avatarUrl || `https://ui-avatars.com/api/?name=${user?.username || 'User'}&background=00D668&color=fff`;
 
-  useEffect(() => {
-    fetchProfileData();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfileData();
+    }, [targetUser]) // On recharge si l'utilisateur cible change
+  );
 
   const fetchProfileData = async () => {
     try {
       setLoading(true);
       const token = await AsyncStorage.getItem('userToken');
 
-      if (!token) {
-        navigation.replace('Login');
-        return;
+      if (isMe) {
+          // --- MON PROFIL ---
+          if (!token) {
+            navigation.replace('Login');
+            return;
+          }
+    
+          const userRes = await apiClient.get('users/profile', {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          setUser(userRes.data);
+          setTrips(userRes.data.trips || []);
+      } else {
+          // --- PROFIL PUBLIC ---
+          // On récupère les voyages de cet utilisateur
+          const tripsRes = await apiClient.get(`/trips/user/${targetUser.id}`);
+          setTrips(tripsRes.data);
+          // Note: On garde les infos user passées en params (avatar, username...)
       }
 
-      const userRes = await apiClient.get('users/profile', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setUser(userRes.data);
-
-      const tripsRes = await apiClient.get(`/users/${userRes.data.id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setTrips(tripsRes.data.trips || []);
     } catch (error) {
-      if (error.response?.status === 401) {
+      if (isMe && error.response?.status === 401) {
         await AsyncStorage.removeItem('userToken');
         navigation.replace('Login');
       } else {
@@ -73,12 +85,22 @@ const ProfileScreen = () => {
   };
 
   const renderGridItem = ({ item }) => (
-    <TouchableOpacity style={styles.gridItem}>
+    <TouchableOpacity 
+      style={styles.gridItem}
+      onPress={() => navigation.navigate('TripDetails', { trip: item, isOwner: true })}
+    >
       <Image 
         source={{ uri: item.imageUrl || 'https://images.unsplash.com/photo-1476610182048-b716b8518aae' }} 
         style={styles.gridImage} 
       />
       <View style={styles.gridOverlay} />
+      
+      {/* BADGE PRIVÉ/PUBLIC */}
+      <View style={[styles.privacyBadge, { backgroundColor: item.isPublic ? '#00D668' : '#666' }]}>
+        <Ionicons name={item.isPublic ? "earth" : "lock-closed"} size={10} color="#fff" />
+        <Text style={styles.privacyText}>{item.isPublic ? "Public" : "Privé"}</Text>
+      </View>
+
       <View style={styles.cardContent}>
         <Text style={styles.gridTitle} numberOfLines={1}>{item.title}</Text>
         <Text style={styles.gridSubtitle}>{item.durationDays} j • {item.budgetEuro}€</Text>
@@ -117,26 +139,33 @@ const ProfileScreen = () => {
     );
   }
 
-  return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      <SafeAreaView style={{ flex: 1 }}>
-        
+  const renderHeader = () => (
+    <View>
         {/* HEADER */}
-        <View style={styles.topActions}>
-          <TouchableOpacity 
-            style={styles.settingsBtn} 
-            onPress={() => navigation.navigate('Settings')}
-          >
-            <Ionicons name="settings-outline" size={24} color="#1A1A1A" />
-          </TouchableOpacity>
+        <View style={[styles.topActions, !isMe && { justifyContent: 'space-between' }]}>
+          {!isMe && (
+              <TouchableOpacity 
+                style={[styles.iconBtn, { backgroundColor: 'transparent', marginLeft: 0 }]} 
+                onPress={() => navigation.goBack()}
+              >
+                <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
+              </TouchableOpacity>
+          )}
+
+          {isMe && (
+            <TouchableOpacity 
+              style={styles.settingsBtn} 
+              onPress={() => navigation.navigate('Settings', { user })}
+            >
+              <Ionicons name="settings-outline" size={24} color="#1A1A1A" />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* INFOS PROFIL */}
         <View style={styles.profileHeader}>
           <View style={styles.avatarContainer}>
             <Image source={{ uri: avatarUri }} style={styles.avatar} />
-            <TouchableOpacity style={styles.editBadge}><Ionicons name="pencil" size={14} color="#fff" /></TouchableOpacity>
           </View>
           <Text style={styles.name}>{user?.username}</Text>
           <Text style={styles.handle}>@{user?.username?.toLowerCase()}</Text>
@@ -164,19 +193,27 @@ const ProfileScreen = () => {
             </TouchableOpacity>
           </View>
         </View>
+    </View>
+  );
 
-        {/* LISTE OU VIDE */}
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      <SafeAreaView style={{ flex: 1 }}>
         <FlatList
           data={activeTab === 'projects' ? trips : []}
           renderItem={renderGridItem}
           keyExtractor={item => item.id.toString()}
           numColumns={2}
           contentContainerStyle={styles.gridContainer}
+          ListHeaderComponent={renderHeader}
           ListFooterComponent={
-            <TouchableOpacity style={styles.logoutBtn} onPress={confirmLogout}>
-              <Ionicons name="power" size={16} color="#FF3B30" />
-              <Text style={styles.logoutText}>Déconnexion</Text>
-            </TouchableOpacity>
+            isMe && (
+              <TouchableOpacity style={styles.logoutBtn} onPress={confirmLogout}>
+                <Ionicons name="power" size={16} color="#FF3B30" />
+                <Text style={styles.logoutText}>Déconnexion</Text>
+              </TouchableOpacity>
+            )
           }
         />
       </SafeAreaView>
@@ -227,7 +264,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FF3B3015'
   },
-  logoutText: { color: '#FF3B30', fontSize: 13, fontWeight: '700', marginLeft: 6 }
+  logoutText: { color: '#FF3B30', fontSize: 13, fontWeight: '700', marginLeft: 6 },
+  
+  // BADGES
+  privacyBadge: { position: 'absolute', top: 10, right: 10, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  privacyText: { color: '#fff', fontSize: 10, fontWeight: 'bold' }
 });
 
 export default ProfileScreen;

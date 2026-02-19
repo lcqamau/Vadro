@@ -51,6 +51,10 @@ model Trip {
   
   tags         String[]
   isPublic     Boolean  @default(true)
+  
+  status       TripStatus @default(PLANNED) 
+  startDate    DateTime?
+  endDate      DateTime?
 
   originalTripId Int?
   originalTrip   Trip?  @relation("RemixHistory", fields: [originalTripId], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -65,6 +69,13 @@ model Trip {
   steps        Step[]
   reviews      Review[]
   favorites    Favorite[]
+}
+
+enum TripStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  PUBLISHED
 }
 
 // --- 3. L'ÉTAPE (Le détail du tracé GPS) ---

@@ -1,141 +1,191 @@
-import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Image, ScrollView, StatusBar } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Image, StatusBar, ActivityIndicator } from 'react-native';
+import MapView, { Marker, Polyline } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Location from 'expo-location';
 // 👇 1. IMPORT TRÈS IMPORTANT POUR LA NAVIGATION
 import { useNavigation } from '@react-navigation/native';
+import client from '../api/client';
 
 const { width, height } = Dimensions.get('window');
 
-// --- DONNÉES ---
-const DATA = [
+// Style "Clean & Modern" (Inspiré d'applications comme Airbnb/Uber)
+const MAP_STYLE = [
   {
-    id: 'fr',
-    name: 'France',
-    lat: 46.603354, lng: 1.888334,
-    zoom: 6,
-    zones: [
-      {
-        id: 'z1', name: 'Alpes', lat: 45.5, lng: 6.5,
-        image: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b',
-        trips: [
-          { id: 101, title: 'Tour du Mont Blanc', days: 7, price: '600€' },
-          { id: 102, title: 'Lac d\'Annecy & Rando', days: 3, price: '250€' },
-        ]
-      },
-      {
-        id: 'z2', name: 'Côte d\'Azur', lat: 43.5, lng: 6.8,
-        image: 'https://images.unsplash.com/photo-1533105079780-92b9be482077',
-        trips: [
-          { id: 103, title: 'Roadtrip Nice-Monaco', days: 4, price: '400€' },
-        ]
-      },
-      {
-        id: 'z3', name: 'Paris & Île-de-France', lat: 48.85, lng: 2.35,
-        image: 'https://images.unsplash.com/photo-1502602898657-3e91760cbb34',
-        trips: [
-          { id: 104, title: 'Romance à Paris', days: 2, price: '300€' },
-          { id: 105, title: 'Châteaux de la Loire', days: 5, price: '550€' },
-        ]
-      }
-    ]
+    "elementType": "geometry",
+    "stylers": [{ "color": "#f5f5f5" }]
   },
   {
-    id: 'it',
-    name: 'Italie',
-    lat: 42.50, lng: 12.50,
-    zoom: 6,
-    zones: [
-      {
-        id: 'z4', name: 'Toscane', lat: 43.4, lng: 11.0,
-        image: 'https://images.unsplash.com/photo-1523906834658-6e24ef2386f9',
-        trips: [
-          { id: 201, title: 'Vignobles & Florence', days: 6, price: '700€' },
-        ]
-      },
-      {
-        id: 'z5', name: 'Dolomites', lat: 46.4, lng: 11.8,
-        image: 'https://images.unsplash.com/photo-1520769945061-0a448c463865',
-        trips: [
-          { id: 202, title: 'Ski & Lacs', days: 5, price: '650€' },
-        ]
-      }
-    ]
+    "elementType": "labels.icon",
+    "stylers": [{ "visibility": "off" }]
   },
   {
-    id: 'jp',
-    name: 'Japon',
-    lat: 36.2048, lng: 138.2529,
-    zoom: 5,
-    zones: [
-      {
-        id: 'z6', name: 'Kyoto & Osaka', lat: 34.8, lng: 135.6,
-        image: 'https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e',
-        trips: [
-          { id: 301, title: 'Temples & Sushi', days: 10, price: '1800€' },
-        ]
-      }
-    ]
+    "elementType": "labels.text.fill",
+    "stylers": [{ "color": "#616161" }]
+  },
+  {
+    "elementType": "labels.text.stroke",
+    "stylers": [{ "color": "#f5f5f5" }]
+  },
+  {
+    "featureType": "administrative.land_parcel",
+    "elementType": "labels.text.fill",
+    "stylers": [{ "color": "#bdbdbd" }]
+  },
+  {
+    "featureType": "poi",
+    "elementType": "geometry",
+    "stylers": [{ "color": "#eeeeee" }]
+  },
+  {
+    "featureType": "poi",
+    "elementType": "labels.text.fill",
+    "stylers": [{ "color": "#757575" }]
+  },
+  {
+    "featureType": "poi.park",
+    "elementType": "geometry",
+    "stylers": [{ "color": "#e5e5e5" }]
+  },
+  {
+    "featureType": "poi.park",
+    "elementType": "labels.text.fill",
+    "stylers": [{ "color": "#9e9e9e" }]
+  },
+  {
+    "featureType": "road",
+    "elementType": "geometry",
+    "stylers": [{ "color": "#ffffff" }]
+  },
+  {
+    "featureType": "road.arterial",
+    "elementType": "labels.text.fill",
+    "stylers": [{ "color": "#757575" }]
+  },
+  {
+    "featureType": "road.highway",
+    "elementType": "geometry",
+    "stylers": [{ "color": "#dadada" }]
+  },
+  {
+    "featureType": "road.highway",
+    "elementType": "labels.text.fill",
+    "stylers": [{ "color": "#616161" }]
+  },
+  {
+    "featureType": "road.local",
+    "elementType": "labels.text.fill",
+    "stylers": [{ "color": "#9e9e9e" }]
+  },
+  {
+    "featureType": "transit.line",
+    "elementType": "geometry",
+    "stylers": [{ "color": "#e5e5e5" }]
+  },
+  {
+    "featureType": "transit.station",
+    "elementType": "geometry",
+    "stylers": [{ "color": "#eeeeee" }]
+  },
+  {
+    "featureType": "water",
+    "elementType": "geometry",
+    "stylers": [{ "color": "#c9c9c9" }]
+  },
+  {
+    "featureType": "water",
+    "elementType": "labels.text.fill",
+    "stylers": [{ "color": "#9e9e9e" }]
   }
 ];
 
-const MAP_STYLE = [
-  { "elementType": "geometry", "stylers": [{ "color": "#f5f5f5" }] },
-  { "elementType": "labels.icon", "stylers": [{ "visibility": "off" }] },
-  { "elementType": "labels.text.fill", "stylers": [{ "color": "#616161" }] },
-  { "elementType": "labels.text.stroke", "stylers": [{ "color": "#f5f5f5" }] },
-  { "featureType": "administrative.land_parcel", "elementType": "labels.text.fill", "stylers": [{ "color": "#bdbdbd" }] },
-  { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#c9c9c9" }] },
-];
-
 const MapScreen = () => {
-  // 👇 2. ON INITIALISE LA NAVIGATION ICI
   const navigation = useNavigation();
-  
   const mapRef = useRef(null);
-  const [viewLevel, setViewLevel] = useState('WORLD'); 
-  const [activeCountry, setActiveCountry] = useState(null);
-  const [selectedZone, setSelectedZone] = useState(null);
+  
+  const [trips, setTrips] = useState([]);
+  const [selectedTrip, setSelectedTrip] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [routeCoordinates, setRouteCoordinates] = useState([]);
 
-  const handleCountryPress = (country) => {
-    setActiveCountry(country);
-    setViewLevel('COUNTRY');
-    setSelectedZone(null);
-    mapRef.current.animateToRegion({
-      latitude: country.lat,
-      longitude: country.lng,
-      latitudeDelta: 8,
-      longitudeDelta: 8,
-    }, 1000);
-  };
+  // Charger les voyages depuis l'API en fonction de la région
+  const fetchTripsInRegion = async (region) => {
+    if (!region) return;
+    
+    // Calcul des bornes (bounding box)
+    const minLat = region.latitude - region.latitudeDelta / 2;
+    const maxLat = region.latitude + region.latitudeDelta / 2;
+    const minLng = region.longitude - region.longitudeDelta / 2;
+    const maxLng = region.longitude + region.longitudeDelta / 2;
 
-  const handleZonePress = (zone) => {
-    // Petit hack pour être sûr que la Map ne vole pas le clic
-    setTimeout(() => {
-      setSelectedZone(zone);
-    }, 50);
-  };
-
-  const handleBack = () => {
-    if (selectedZone) {
-      setSelectedZone(null);
-    } else {
-      setViewLevel('WORLD');
-      setActiveCountry(null);
-      mapRef.current.animateToRegion({
-        latitude: 20,
-        longitude: 0,
-        latitudeDelta: 60,
-        longitudeDelta: 60,
-      }, 1000);
+    try {
+      setLoading(true);
+      const res = await client.get('/trips', {
+        params: { minLat, maxLat, minLng, maxLng }
+      });
+      
+      const validTrips = res.data.filter(t => 
+        t.steps && t.steps.length > 0 && 
+        t.steps[0].latitude && t.steps[0].longitude
+      );
+      
+      // On remplace les trips visibles
+      setTrips(validTrips);
+    } catch (error) {
+      console.error("Erreur chargement map zone:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // 👇 3. FONCTION POUR ALLER AU DÉTAIL
-  const goToDetails = (trip, image) => {
-    // On navigue vers l'écran 'TripDetails' en passant les infos
-    navigation.navigate('TripDetails', { trip: { ...trip, image: image } });
+  // Chargement initial (France par défaut)
+  useEffect(() => {
+     // On lance une première recherche sur la zone par défaut
+     fetchTripsInRegion({
+        latitude: 46, longitude: 2, latitudeDelta: 10, longitudeDelta: 10
+     });
+  }, []);
+
+  const onRegionChangeComplete = (region) => {
+      // On recharge les données quand l'utilisateur a fini de bouger la carte
+      fetchTripsInRegion(region);
+  };
+
+  const handleMarkerPress = async (trip) => {
+    setSelectedTrip(trip);
+    setRouteCoordinates([]); 
+
+    // Fetch full trip details
+    try {
+        const res = await client.get(`/trips/${trip.id}`);
+        const steps = res.data.steps || [];
+        if (steps.length > 0) {
+             const coords = steps
+                .sort((a, b) => a.orderIndex - b.orderIndex)
+                .map(s => ({
+                    latitude: s.latitude,
+                    longitude: s.longitude
+                }))
+                .filter(c => c.latitude && c.longitude);
+            setRouteCoordinates(coords);
+        }
+    } catch (error) {
+        console.error("Error fetching trip details for map:", error);
+    }
+
+    // Centrer la carte sur le marker
+    mapRef.current.animateToRegion({
+        latitude: trip.steps[0].latitude,
+        longitude: trip.steps[0].longitude,
+        latitudeDelta: 1,
+        longitudeDelta: 1,
+    }, 500);
+  };
+
+  const goToDetails = (trip) => {
+    navigation.navigate('TripDetails', { trip });
   };
 
   return (
@@ -147,96 +197,140 @@ const MapScreen = () => {
         style={styles.map}
         customMapStyle={MAP_STYLE}
         initialRegion={{
-          latitude: 46, longitude: 2, latitudeDelta: 50, longitudeDelta: 50
+          latitude: 46, longitude: 2, latitudeDelta: 10, longitudeDelta: 10
         }}
-        onPress={() => {
-           // Si on clique sur la carte (hors marqueur), on ferme la liste
-           if (selectedZone) setSelectedZone(null);
-        }}
+        onRegionChangeComplete={onRegionChangeComplete}
+        onPress={() => setSelectedTrip(null)}
       >
-        {/* VUE MONDE */}
-        {viewLevel === 'WORLD' && DATA.map((country) => (
-          <Marker
-            key={country.id}
-            coordinate={{ latitude: country.lat, longitude: country.lng }}
-            onPress={(e) => {
-              e.stopPropagation(); // Empêche la carte de fermer
-              handleCountryPress(country);
-            }}
-          >
-            <View style={styles.countryMarker}>
-              <Text style={styles.countryText}>{country.name}</Text>
-            </View>
-          </Marker>
-        ))}
+        {routeCoordinates.length > 1 && (
+            <Polyline
+                coordinates={routeCoordinates}
+                strokeColor="#00D668"
+                strokeWidth={4}
+            />
+        )}
 
-        {/* VUE PAYS */}
-        {viewLevel === 'COUNTRY' && activeCountry && activeCountry.zones.map((zone) => (
-          <Marker
-            key={zone.id}
-            coordinate={{ latitude: zone.lat, longitude: zone.lng }}
-            onPress={(e) => {
-              e.stopPropagation();
-              handleZonePress(zone);
-            }}
-          >
-            <View style={[
-              styles.zoneMarker, 
-              selectedZone?.id === zone.id && styles.zoneMarkerSelected
-            ]}>
-              <View style={styles.zoneDot} />
-              <Text style={styles.zoneText}>{zone.name}</Text>
-            </View>
-          </Marker>
-        ))}
+        {trips.map((trip) => {
+          const isSelected = selectedTrip?.id === trip.id;
+          return (
+            <Marker
+                key={trip.id}
+                coordinate={{ 
+                    latitude: trip.steps[0].latitude, 
+                    longitude: trip.steps[0].longitude 
+                }}
+                onPress={(e) => {
+                    e.stopPropagation();
+                    handleMarkerPress(trip);
+                }}
+                tracksViewChanges={false}
+                zIndex={isSelected ? 999 : 1}
+            >
+                <View style={[styles.markerContainer, isSelected && styles.markerSelected]}>
+                    <View style={styles.markerImageWrapper}>
+                        <Image source={{ uri: trip.imageUrl }} style={styles.markerImage} />
+                    </View>
+                    <View style={styles.markerBadge}>
+                        <Text style={styles.markerText}>{trip.budgetEuro}€</Text>
+                    </View>
+                    {/* Petit triangle pointeur */}
+                    <View style={styles.markerPointer} />
+                </View>
+            </Marker>
+          );
+        })}
       </MapView>
 
-      {/* BOUTON RETOUR */}
-      {viewLevel !== 'WORLD' && (
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
-          <Text style={styles.backText}>
-            {selectedZone ? 'Retour au pays' : 'Monde'}
-          </Text>
-        </TouchableOpacity>
+      {/* BOUTON GEOLOCALISATION */}
+       <TouchableOpacity 
+          style={styles.geoBtn} 
+          onPress={async () => {
+              let { status } = await Location.requestForegroundPermissionsAsync();
+              if (status !== 'granted') {
+                  alert("Permission refusée");
+                  return;
+              }
+              let location = await Location.getCurrentPositionAsync({});
+              mapRef.current.animateToRegion({
+                  latitude: location.coords.latitude,
+                  longitude: location.coords.longitude,
+                  latitudeDelta: 0.1, // Zoom assez proche
+                  longitudeDelta: 0.1,
+              }, 1000);
+          }}
+       >
+          <Ionicons name="locate" size={24} color="#1A1A1A" />
+       </TouchableOpacity>
+
+      {/* HEADER FLOTTANT (Recherche) */}
+      <BlurView intensity={80} tint="light" style={styles.searchHeader}>
+         <TouchableOpacity style={styles.searchBar} activeOpacity={0.8}>
+             <Ionicons name="search" size={20} color="#1A1A1A" />
+             <Text style={styles.searchPlaceholder}>Où allez-vous ?</Text>
+         </TouchableOpacity>
+         <TouchableOpacity style={styles.filterBtn}>
+             <Ionicons name="options" size={20} color="#1A1A1A" />
+         </TouchableOpacity>
+      </BlurView>
+      
+      {loading && (
+          <View style={styles.loadingPill}>
+              <ActivityIndicator size="small" color="#00D668" />
+              <Text style={styles.loadingText}>Recherche...</Text>
+          </View>
       )}
 
-      {/* LISTE DES VOYAGES (BOTTOM SHEET) */}
-      {selectedZone && (
-        <View style={styles.bottomSheet}>
-          {/* Fond flou */}
-          <BlurView intensity={90} tint="light" style={StyleSheet.absoluteFill} />
-          
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>Voyages • {selectedZone.name}</Text>
-            <TouchableOpacity onPress={() => setSelectedZone(null)}>
-              <Ionicons name="close-circle" size={30} color="#ccc" />
+      {/* BOTTOM SHEET DÉTAIL VOYAGE (Nouvelle version) */}
+      {selectedTrip && (
+        <View style={styles.bottomCardContainer}>
+            <TouchableOpacity 
+                style={styles.bottomCard}
+                activeOpacity={0.95}
+                onPress={() => goToDetails(selectedTrip)}
+            >
+                {/* Image Header */}
+                <View style={styles.cardImageContainer}>
+                    <Image source={{ uri: selectedTrip.imageUrl }} style={styles.cardImage} />
+                    <LinearGradient
+                        colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)']}
+                        style={styles.cardGradient}
+                    />
+                    <TouchableOpacity 
+                        style={styles.closeBtn}
+                        onPress={() => setSelectedTrip(null)}
+                    >
+                        <Ionicons name="close" size={20} color="#fff" />
+                    </TouchableOpacity>
+                    
+                    <View style={styles.cardImageOverlay}>
+                        <View style={styles.cardTag}>
+                            <Text style={styles.cardTagText}>{selectedTrip.tags?.[0] || 'VOYAGE'}</Text>
+                        </View>
+                    </View>
+                </View>
+
+                {/* Content */}
+                <View style={styles.cardContent}>
+                    <View style={styles.cardHeaderRow}>
+                        <Text style={styles.cardTitle} numberOfLines={1}>{selectedTrip.title}</Text>
+                        <View style={styles.cardRating}>
+                            <Ionicons name="star" size={14} color="#FFE500" />
+                            <Text style={styles.cardRatingText}>{selectedTrip.rating || "4.8"}</Text>
+                        </View>
+                    </View>
+                    
+                    <View style={styles.cardFooterRow}>
+                        <View style={styles.cardMeta}>
+                             <Ionicons name="time-outline" size={16} color="#8E8E93" />
+                             <Text style={styles.cardMetaText}>{selectedTrip.durationDays} jours</Text>
+                        </View>
+                        <View style={styles.cardPriceBox}>
+                             <Text style={styles.cardPriceLabel}>dès </Text>
+                             <Text style={styles.cardPrice}>{selectedTrip.budgetEuro}€</Text>
+                        </View>
+                    </View>
+                </View>
             </TouchableOpacity>
-          </View>
-
-          <ScrollView style={{ maxHeight: 350 }} showsVerticalScrollIndicator={false}>
-            {selectedZone.trips.map((trip) => (
-              <TouchableOpacity 
-                key={trip.id} 
-                style={styles.tripItem}
-                // 👇 4. LE CLIC EST ICI
-                onPress={() => goToDetails(trip, selectedZone.image)}
-              >
-                <Image source={{ uri: selectedZone.image }} style={styles.tripThumb} />
-                
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.tripTitle}>{trip.title}</Text>
-                  <Text style={styles.tripSubtitle}>{trip.days} jours</Text>
-                </View>
-
-                <View style={styles.priceTag}>
-                  <Text style={styles.priceText}>{trip.price}</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-            {/* Espace vide pour ne pas être caché par la navbar */}
-            <View style={{ height: 120 }} />
-          </ScrollView>
         </View>
       )}
     </View>
@@ -247,57 +341,110 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   map: { width: width, height: height },
 
-  // PAYS
-  countryMarker: {
-    backgroundColor: '#fff',
-    paddingVertical: 8, paddingHorizontal: 16,
-    borderRadius: 25, borderWidth: 1, borderColor: '#eee',
-    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, elevation: 5,
+  // NOUVEAUX MARKERS (Bulles Images)
+  markerContainer: { alignItems: 'center', justifyContent: 'center' },
+  markerSelected: { transform: [{ scale: 1.15 }], zIndex: 999 },
+  
+  markerImageWrapper: {
+      width: 50, height: 50, borderRadius: 25,
+      borderWidth: 2, borderColor: '#fff',
+      backgroundColor: '#f0f0f0',
+      overflow: 'hidden',
+      shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, elevation: 4
   },
-  countryText: { fontWeight: 'bold', fontSize: 14, color: '#1A1A1A' },
+  markerImage: { width: '100%', height: '100%' },
+  
+  markerBadge: {
+      position: 'absolute', bottom: -5,
+      backgroundColor: '#1A1A1A', paddingHorizontal: 6, paddingVertical: 2,
+      borderRadius: 10, borderWidth: 1, borderColor: '#fff',
+      shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, elevation: 3
+  },
+  markerText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
+  
+  markerPointer: {
+      width: 0, height: 0, marginTop: 4,
+      borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 6,
+      borderStyle: 'solid', backgroundColor: 'transparent',
+      borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: 'rgba(0,0,0,0.2)',
+      // C'est juste une petite ombre optionnelle sous la bulle
+      opacity: 0
+  },
 
-  // ZONES
-  zoneMarker: { alignItems: 'center', justifyContent: 'center' },
-  zoneMarkerSelected: { transform: [{ scale: 1.1 }] },
-  zoneDot: {
-    width: 20, height: 20, borderRadius: 10,
-    backgroundColor: '#00D668', borderWidth: 3, borderColor: '#fff',
-    shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 3,
+  // HEADER RECHERCHE
+  searchHeader: {
+      position: 'absolute', top: 50, left: 20, right: 20,
+      flexDirection: 'row', alignItems: 'center', gap: 10,
+      padding: 10, borderRadius: 30, overflow: 'hidden'
   },
-  zoneText: {
-    marginTop: 4, backgroundColor: 'rgba(255,255,255,0.8)',
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
-    fontSize: 12, fontWeight: '600', color: '#333', overflow: 'hidden',
+  searchBar: {
+      flex: 1, flexDirection: 'row', alignItems: 'center',
+      backgroundColor: '#fff', borderRadius: 25,
+      paddingHorizontal: 15, paddingVertical: 12,
+      shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, elevation: 2
+  },
+  searchPlaceholder: { marginLeft: 10, color: '#8E8E93', fontWeight: '500' },
+  filterBtn: {
+      width: 48, height: 48, borderRadius: 24,
+      backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center',
+      shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, elevation: 2
+  },
+  
+  geoBtn: {
+      position: 'absolute', top: 110, right: 20, 
+      width: 48, height: 48, borderRadius: 24,
+      backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center',
+      shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, elevation: 4
   },
 
-  // UI ELEMENTS
-  backButton: {
-    position: 'absolute', top: 50, left: 20,
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#fff', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 30,
-    shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 5, elevation: 5, gap: 8,
+  // LOADING
+  loadingPill: {
+      position: 'absolute', top: 120, alignSelf: 'center',
+      flexDirection: 'row', alignItems: 'center', gap: 8,
+      backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
+      shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, elevation: 4
   },
-  backText: { fontWeight: 'bold', color: '#1A1A1A' },
+  loadingText: { fontSize: 12, fontWeight: '600', color: '#1A1A1A' },
 
-  bottomSheet: {
-    position: 'absolute', bottom: 0, width: '100%',
-    borderTopLeftRadius: 30, borderTopRightRadius: 30,
-    overflow: 'hidden', paddingTop: 20, paddingHorizontal: 20,
-    paddingBottom: 0,
+  // BOTTOM CARD (NOUVEAU DESIGN PREMIUM)
+  bottomCardContainer: {
+      position: 'absolute', bottom: 130, left: 20, right: 20,
+      shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.2, shadowRadius: 20, elevation: 10,
   },
-  sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-  sheetTitle: { fontSize: 18, fontWeight: '900', color: '#1A1A1A' },
-
-  tripItem: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.7)', // Un peu transparent pour l'effet glass
-    padding: 12, borderRadius: 16, marginBottom: 12,
+  bottomCard: {
+      backgroundColor: '#fff', borderRadius: 24, overflow: 'hidden',
   },
-  tripThumb: { width: 50, height: 50, borderRadius: 10, marginRight: 15, backgroundColor: '#eee' },
-  tripTitle: { fontWeight: 'bold', fontSize: 15, color: '#1A1A1A' },
-  tripSubtitle: { color: '#8E8E93', fontSize: 12, marginTop: 2 },
-  priceTag: { backgroundColor: '#E8FAF0', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8 },
-  priceText: { color: '#00D668', fontWeight: 'bold', fontSize: 13 },
+  cardImageContainer: { height: 160, width: '100%', position: 'relative' },
+  cardImage: { width: '100%', height: '100%' },
+  cardGradient: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 60 },
+  
+  closeBtn: {
+      position: 'absolute', top: 10, right: 10,
+      width: 32, height: 32, borderRadius: 16,
+      backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center'
+  },
+  
+  cardImageOverlay: { position: 'absolute', top: 10, left: 10 },
+  cardTag: { 
+      backgroundColor: 'rgba(255,255,255,0.9)', paddingHorizontal: 8, paddingVertical: 4, 
+      borderRadius: 8,
+  },
+  cardTagText: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', color: '#1A1A1A' },
+  
+  cardContent: { padding: 16 },
+  
+  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
+  cardTitle: { fontSize: 18, fontWeight: '800', color: '#1A1A1A', flex: 1, marginRight: 10 },
+  cardRating: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  cardRatingText: { fontSize: 13, fontWeight: '700', color: '#1A1A1A' },
+  
+  cardFooterRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 },
+  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  cardMetaText: { fontSize: 13, color: '#8E8E93', fontWeight: '500' },
+  
+  cardPriceBox: { flexDirection: 'row', alignItems: 'baseline' },
+  cardPriceLabel: { fontSize: 12, color: '#8E8E93', marginRight: 2 },
+  cardPrice: { fontSize: 18, fontWeight: '900', color: '#00D668' },
 });
 
 export default MapScreen;

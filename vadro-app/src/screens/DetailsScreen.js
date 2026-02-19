@@ -1,13 +1,12 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, StatusBar, ActivityIndicator, FlatList, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, StatusBar, ActivityIndicator, FlatList, Alert, Modal, TextInput } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { BlurView } from 'expo-blur';
-import * as Haptics from 'expo-haptics'; // Pour la vibration
 import client from '../api/client'; // Ton client sécurisé
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFavorites } from '../context/FavoritesContext';
 
 const { width, height } = Dimensions.get('window');
 const HEADER_HEIGHT = height * 0.55;
@@ -44,41 +43,88 @@ const groupStepsByDay = (steps) => {
 };
 
 const TripDetailsScreen = ({ route, navigation }) => {
-  const { trip } = route.params;
+  const { trip, isOwner } = route.params;
 
   // --- ÉTATS ---
   const [steps, setSteps] = useState([]); 
   const [loadingSteps, setLoadingSteps] = useState(true);
   const [activeSlide, setActiveSlide] = useState(0);
-  
-  // GESTION FAVORIS : On initialise avec la donnée si elle existe (ex: venant de Wishlist)
-  const [isFavorite, setIsFavorite] = useState(trip.likedAt ? true : false);
 
+  // --- AVIS ---
+  const [reviews, setReviews] = useState([]);
+  const [isReviewModalVisible, setReviewModalVisible] = useState(false);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState('');
+
+  // GESTION FAVORIS GLOBAL (Seulement si pas propriétaire)
+  const { isFavorite: checkIsFavorite, toggleFavorite } = useFavorites();
+  const isFavorite = !isOwner && checkIsFavorite(trip.id);
+  
+  // CHARGEMENT AVIS
+  useEffect(() => {
+    const fetchReviews = async () => {
+        try {
+            const res = await client.get(`/trips/${trip.id}/reviews`);
+            setReviews(res.data);
+        } catch (err) {
+            console.log("No reviews yet", err);
+        }
+    };
+    fetchReviews();
+  }, [trip.id]);
+
+  const handlePostReview = async () => {
+      try {
+          const res = await client.post(`/trips/${trip.id}/reviews`, {
+              rating: reviewRating,
+              comment: reviewComment
+          });
+          setReviews([res.data, ...reviews]);
+          setReviewModalVisible(false);
+          setReviewComment('');
+          Alert.alert("Merci !", "Votre avis a été publié.");
+      } catch (err) {
+          Alert.alert("Erreur", "Impossible de publier l'avis (probablement déjà fait).");
+      }
+  };
+  
   // Gestion des images
   const images = (trip.images && trip.images.length > 0) 
     ? trip.images 
     : [trip.imageUrl || 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1'];
 
-  // --- 1. VÉRIFIER LE STATUT FAVORI (API) ---
-  useEffect(() => {
-    const checkFavoriteStatus = async () => {
-      try {
-        // On demande au backend si c'est liké
-        const res = await client.get(`/favorites/${trip.id}/check`, {
-          headers: { Authorization: `Bearer ${await AsyncStorage.getItem('userToken')}` }
-        });
-        setIsFavorite(res.data.isFavorite);
-      } catch (error) {
-        // Silencieux si erreur (ex: pas connecté), on garde la valeur par défaut
-        console.log("Info: Check favori impossible (ou non connecté)");
-      }
-    };
+  // ... (useEffect fetchSteps unchanged)
 
-    // Si on ne sait pas déjà (via la navigation), on vérifie
-    if (trip.likedAt === undefined) {
-      checkFavoriteStatus();
-    }
-  }, [trip.id]);
+  const handleDeleteTrip = () => {
+      Alert.alert(
+          "Supprimer ce voyage ?",
+          "Cette action est irréversible.",
+          [
+              { text: "Annuler", style: "cancel" },
+              { 
+                  text: "Supprimer", 
+                  style: "destructive",
+                  onPress: async () => {
+                      try {
+                          await client.delete(`/trips/${trip.id}`);
+                          navigation.goBack();
+                      } catch (err) {
+                          Alert.alert("Erreur", "Impossible de supprimer le voyage.");
+                      }
+                  }
+              }
+          ]
+      );
+  };
+  
+  const handleEditTrip = () => {
+      // Pour l'instant, on redirige vers le remixeur en mode "Nouveau Remix" 
+      // car l'édition directe (PUT) n'est pas encore câblée dans GeneratedTripScreen.
+      // On peut proposer de "Remixer" comme méthode d'édition pour l'instant.
+      handleRemixTrip();
+  };
+
+  // ... (handleRemixTrip unchanged)
 
   // --- 2. CHARGEMENT DES ÉTAPES ---
   useEffect(() => {
@@ -96,25 +142,53 @@ const TripDetailsScreen = ({ route, navigation }) => {
   }, [trip.id]);
 
   // --- 3. FONCTION TOGGLE LIKE ---
-  const handleToggleFavorite = async () => {
-    // A. Vibration
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  const handleToggleFavorite = () => {
+    toggleFavorite(trip.id);
+  };
 
-    // B. UI Optimiste
-    const previousState = isFavorite;
-    setIsFavorite(!isFavorite);
+  // --- 4. FONCTION REMIX VOYAGE ---
+  const handleRemixTrip = () => {
+    Alert.alert(
+      "Remixer ce voyage ?",
+      "Vous allez être redirigé vers l'éditeur pour personnaliser ce voyage à votre goût.",
+      [
+        { text: "Annuler", style: "cancel" },
+        { 
+          text: "C'est parti !", 
+          onPress: () => {
+             // 1. On formate les données pour l'écran "GeneratedTrip"
+             // Il attend une structure : { destination, image, days: [{ day: 1, activities: [...] }] }
+             
+             // On groupe les étapes par jour si ce n'est pas déjà fait
+             const stepsByDay = groupStepsByDay(steps);
+             
+             const remixData = {
+                 destination: `${trip.title} (Remix)`,
+                 image: trip.imageUrl,
+                 days: stepsByDay.map(group => ({
+                     day: group.day,
+                     activities: group.steps.map(s => ({
+                         title: s.title || s.name || "Activité",
+                         desc: s.description || "",
+                         image: s.imageUrl || null
+                     }))
+                 }))
+             };
 
-    try {
-      // C. Appel API
-      await client.post(`/favorites/${trip.id}` , {}, {
-        headers: { Authorization: `Bearer ${await AsyncStorage.getItem('userToken')}` }
-      });
-    } catch (error) {
-      // D. Rollback si erreur
-      console.error("Erreur toggle:", error);
-      setIsFavorite(previousState);
-      Alert.alert("Erreur", "Impossible de modifier les favoris (vérifiez votre connexion)");
-    }
+             // 2. Navigation vers l'éditeur
+             navigation.navigate('GeneratedTrip', {
+                 aiData: remixData,
+                 vibes: trip.tags || [],
+                 days: trip.durationDays,
+                 travelers: 1, // Par défaut
+                 budget: { label: `${trip.budgetEuro}€` },
+                 // On passe l'ID original pour lier le remix
+                 originalTripId: trip.id
+             });
+          }
+        }
+      ]
+    );
   };
 
   const onViewableItemsChanged = useCallback(({ viewableItems }) => {
@@ -140,19 +214,37 @@ const TripDetailsScreen = ({ route, navigation }) => {
               <Ionicons name="share-outline" size={24} color="#fff" />
             </TouchableOpacity>
             
-            {/* BOUTON CŒUR CONNECTÉ */}
-            <TouchableOpacity 
-              style={styles.glassButton} 
-              onPress={handleToggleFavorite}
-              activeOpacity={0.7}
-              hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
-            >
-              <Ionicons 
-                name={isFavorite ? "heart" : "heart-outline"} 
-                size={24} 
-                color={isFavorite ? "#FF3B30" : "#fff"} 
-              />
-            </TouchableOpacity>
+            {/* ACTIONS PROPRIÉTAIRE OU FAVORIS */}
+            {isOwner ? (
+                <View style={{flexDirection: 'row', gap: 10}}>
+                    <TouchableOpacity 
+                      style={[styles.glassButton, {backgroundColor: 'rgba(255,59,48,0.2)', borderColor: 'rgba(255,59,48,0.5)'}]} 
+                      onPress={handleDeleteTrip}
+                    >
+                      <Ionicons name="trash-outline" size={22} color="#FF3B30" />
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                      style={styles.glassButton} 
+                      onPress={handleEditTrip}
+                    >
+                      <Ionicons name="pencil" size={22} color="#fff" />
+                    </TouchableOpacity>
+                </View>
+            ) : (
+                <TouchableOpacity 
+                  style={styles.glassButton} 
+                  onPress={handleToggleFavorite}
+                  activeOpacity={0.7}
+                  hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
+                >
+                  <Ionicons 
+                    name={isFavorite ? "heart" : "heart-outline"} 
+                    size={24} 
+                    color={isFavorite ? "#FF3B30" : "#fff"} 
+                  />
+                </TouchableOpacity>
+            )}
         </View>
       </SafeAreaView>
 
@@ -214,16 +306,20 @@ const TripDetailsScreen = ({ route, navigation }) => {
 
             <Text style={styles.title}>{trip.title}</Text>
             
-            <View style={styles.authorRow}>
+            <TouchableOpacity style={styles.authorRow} onPress={() => {
+                if (trip.author) {
+                    navigation.push('UserProfile', { user: trip.author });
+                }
+            }}>
                 <Image 
-                    source={{ uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde' }} 
+                    source={{ uri: trip.author?.avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde' }} 
                     style={styles.authorAvatar} 
                 />
                 <View>
                     <Text style={styles.authorLabel}>Créé par</Text>
-                    <Text style={styles.authorName}>L'Explorateur</Text>
+                    <Text style={styles.authorName}>{trip.author?.username || "Anonyme"}</Text>
                 </View>
-            </View>
+            </TouchableOpacity>
 
             <View style={styles.divider} />
 
@@ -293,12 +389,72 @@ const TripDetailsScreen = ({ route, navigation }) => {
                 </View>
               ))}
             </View>
+// ... (Après la liste des étapes)
           ) : (
             <Text style={styles.emptyText}>Aucune étape pour ce voyage.</Text>
           )}
 
+           {/* --- AVIS --- */}
+         <View style={{marginTop: 40, paddingBottom: 20}}>
+            <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:15}}>
+                <Text style={styles.sectionTitle}>Avis & Notes ({reviews.length})</Text>
+                {!isOwner && (
+                    <TouchableOpacity onPress={() => setReviewModalVisible(true)}>
+                        <Text style={{color:'#00D668', fontWeight:'bold'}}>Laisser un avis</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+            
+            {reviews.map((review) => (
+                <View key={review.id} style={{marginBottom: 15, backgroundColor:'#F9F9F9', padding:15, borderRadius:15}}>
+                    <View style={{flexDirection:'row', justifyContent:'space-between', marginBottom:5}}>
+                        <Text style={{fontWeight:'bold'}}>{review.user?.username || 'Voyageur'}</Text>
+                        <View style={{flexDirection:'row'}}>{[...Array(review.rating)].map((_,i)=><Ionicons key={i} name="star" size={12} color="#F4C430"/>)}</View>
+                    </View>
+                    <Text style={{color:'#444'}}>{review.comment}</Text>
+                    <Text style={{color:'#999', fontSize:10, marginTop:5}}>{new Date(review.createdAt).toLocaleDateString()}</Text>
+                </View>
+            ))}
+            
+            {reviews.length === 0 && (
+                <Text style={{color:'#999', fontStyle:'italic'}}>Soyez le premier à donner votre avis !</Text>
+            )}
+         </View>
+
         </View>
       </ScrollView>
+
+      {/* MODAL AVIS */}
+      <Modal visible={isReviewModalVisible} animationType="slide" transparent>
+          <View style={{flex:1, justifyContent:'flex-end', backgroundColor:'rgba(0,0,0,0.5)'}}>
+              <View style={{backgroundColor:'#fff', padding:20, borderTopLeftRadius:20, borderTopRightRadius:20}}>
+                  <Text style={styles.sectionTitle}>Votre avis</Text>
+                  
+                  <View style={{flexDirection:'row', marginBottom:20, justifyContent:'center', gap:10}}>
+                      {[1,2,3,4,5].map(star => (
+                          <TouchableOpacity key={star} onPress={() => setReviewRating(star)}>
+                              <Ionicons name={star <= reviewRating ? "star" : "star-outline"} size={32} color="#F4C430" />
+                          </TouchableOpacity>
+                      ))}
+                  </View>
+                  
+                  <TextInput 
+                      style={{backgroundColor:'#F0F0F0', padding:15, borderRadius:10, height:100, textAlignVertical:'top', marginBottom:20}}
+                      placeholder="Racontez votre expérience..."
+                      multiline
+                      value={reviewComment}
+                      onChangeText={setReviewComment}
+                  />
+                  
+                  <TouchableOpacity onPress={handlePostReview} style={{backgroundColor:'#00D668', padding:15, borderRadius:15, alignItems:'center', marginBottom:10}}>
+                      <Text style={{color:'#fff', fontWeight:'bold'}}>Publier</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setReviewModalVisible(false)} style={{padding:15, alignItems:'center'}}>
+                      <Text style={{color:'#666'}}>Annuler</Text>
+                  </TouchableOpacity>
+              </View>
+          </View>
+      </Modal>
 
       {/* --- BOTTOM BAR --- */}
       <View style={styles.bottomBarWrapper}>
@@ -310,10 +466,15 @@ const TripDetailsScreen = ({ route, navigation }) => {
                 <Text style={{color:'#666', fontSize:12}}> / pers</Text>
             </View>
             </View>
-            <TouchableOpacity style={styles.bookButton}>
-            <Text style={styles.bookButtonText}>Réserver</Text>
-            <Ionicons name="arrow-forward" size={20} color="#fff" />
+            
+            <TouchableOpacity 
+                style={styles.bookButton} 
+                onPress={isOwner ? handleEditTrip : handleRemixTrip}
+            >
+                <Text style={styles.bookButtonText}>{isOwner ? "Modifier ce voyage" : "Remixer ce voyage"}</Text>
+                <Ionicons name={isOwner ? "pencil" : "copy-outline"} size={20} color="#fff" />
             </TouchableOpacity>
+
           </View>
       </View>
     </View>

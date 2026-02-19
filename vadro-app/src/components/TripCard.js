@@ -1,57 +1,30 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity, FlatList } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Haptics from 'expo-haptics'; // Vibration (si installé)
-import apiClient from '../api/client'; // Ton client configuré
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BlurView } from 'expo-blur';
+import { useFavorites } from '../context/FavoritesContext';
 
 const { width } = Dimensions.get('window');
 
 // --- RÉGLAGES DIMENSIONS CARRÉES ---
-const CARD_MARGIN = 0; // Si tu veux coller aux bords ou mettre 20
+const CARD_MARGIN = 0; 
 const CARD_WIDTH = width - (CARD_MARGIN * 2); 
 const IMAGE_HEIGHT = CARD_WIDTH; 
 
-const TripCard = ({ trip }) => {
+const TripCard = ({ trip, variant = 'card' }) => {
   const navigation = useNavigation();
   const [activeIndex, setActiveIndex] = useState(0);
   const flatListRef = useRef(null);
 
-  // Initialisation de l'état local avec la prop
-  const [isFavorite, setIsFavorite] = useState(trip.likedAt ? true : false);
+  // Utilisation du contexte global pour les favoris
+  const { isFavorite, toggleFavorite } = useFavorites();
+  const liked = isFavorite(trip.id);
 
-  // --- 1. LE FIX DE SYNCHRONISATION ---
-  // C'est ici que la magie opère : quand la Home rafraîchit les données,
-  // ce useEffect force la mise à jour du cœur sur la carte.
-  useEffect(() => {
-    if (trip.likedAt !== undefined) {
-      setIsFavorite(trip.likedAt ? true : false);
-    }
-  }, [trip.likedAt]); // On surveille le changement de cette donnée précise
-
-  // --- 2. FONCTION TOGGLE (Nettoyée) ---
-  const handleToggleFavorite = async () => {
-    // Vibration (Optionnel)
-    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch (e) {}
-
-    // UI Optimiste
-    const previousState = isFavorite;
-    setIsFavorite(!isFavorite); 
-
-    try {
-      // Appel API simplifié (le client gère le token tout seul)
-      await apiClient.post(`/favorites/${trip.id}` ,  {}, {
-        headers: { Authorization: `Bearer ${await AsyncStorage.getItem('userToken')}` }
-      });
-      
-    } catch (error) {
-      console.error("Erreur Like/Dislike :", error);
-      // Rollback en cas d'erreur
-      setIsFavorite(previousState);
-    }
+  const handleToggleFavorite = () => {
+    toggleFavorite(trip.id);
   };
 
   // --- GESTION IMAGES ---
@@ -59,6 +32,60 @@ const TripCard = ({ trip }) => {
     ? trip.images 
     : [trip.imageUrl || 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1'];
 
+  const handlePress = () => navigation.navigate('TripDetails', { trip });
+
+  // --- RENDER : MODE SWIPE (FULL CARD) ---
+  if (variant === 'swipe') {
+    return (
+      <TouchableOpacity activeOpacity={0.95} onPress={handlePress} style={styles.swipeContainer}>
+         <Image 
+            source={{ uri: images[0] }} 
+            contentFit="cover" 
+            style={styles.swipeImage} 
+            transition={300}
+         />
+         <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.9)']}
+            locations={[0, 0.6, 1]}
+            style={styles.swipeGradient}
+         />
+         
+         {/* Badge Tag */}
+         <View style={styles.swipeTagContainer}>
+            <Text style={styles.swipeTagProp}>{trip.tags?.[0] || 'VOYAGE'}</Text>
+         </View>
+
+         {/* Contenu Flou */}
+         {/* Contenu Flou */}
+         <View style={styles.swipeContentWrapper}>
+            <BlurView intensity={30} tint="light" style={styles.swipeContentBlur}>
+                <View>
+                    <Text style={styles.swipeTitle} numberOfLines={2}>{trip.title}</Text>
+                    
+                    <View style={styles.swipeRow}>
+                        <View style={styles.swipeIconInfo}>
+                            <Ionicons name="time-outline" size={16} color="#1A1A1A" />
+                            <Text style={styles.swipeText}>{trip.durationDays}J</Text>
+                        </View>
+                        <View style={styles.swipeIconInfo}>
+                            <Ionicons name="star" size={16} color="#FFE500" />
+                            <Text style={styles.swipeText}>{trip.rating || "4.8"}</Text>
+                        </View>
+                    </View>
+
+                    <View style={styles.swipePriceContainer}>
+                        <Text style={styles.swipePriceLabel}>Dès </Text>
+                        <Text style={styles.swipePrice}>{trip.budgetEuro} €</Text>
+                    </View>
+                </View>
+            </BlurView>
+         </View>
+         
+      </TouchableOpacity>
+    );
+  }
+
+  // --- RENDER : MODE CARTE (LISTE) ---
   const onViewableItemsChanged = useCallback(({ viewableItems }) => {
     if (viewableItems.length > 0) {
       setActiveIndex(viewableItems[0].index || 0);
@@ -66,8 +93,6 @@ const TripCard = ({ trip }) => {
   }, []);
 
   const viewabilityConfig = { itemVisiblePercentThreshold: 50 };
-
-  const handlePress = () => navigation.navigate('TripDetails', { trip });
 
   return (
     <View style={styles.container}>
@@ -111,9 +136,9 @@ const TripCard = ({ trip }) => {
           hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
         >
           <Ionicons 
-            name={isFavorite ? "heart" : "heart-outline"} 
+            name={liked ? "heart" : "heart-outline"} 
             size={24} 
-            color={isFavorite ? "#FF3B30" : "#fff"} 
+            color={liked ? "#FF3B30" : "#fff"} 
           />
         </TouchableOpacity>
 
@@ -159,19 +184,75 @@ const TripCard = ({ trip }) => {
 };
 
 const styles = StyleSheet.create({
+  // --- STYLE CLASSIQUE ---
   container: {
     backgroundColor: '#fff',
     borderRadius: 24,
     marginBottom: 25, 
-    // Si tu avais mis des marges sur CARD_WIDTH, il faut les gérer ici ou dans le parent
-    // marginHorizontal: CARD_MARGIN, 
-    
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.08,
     shadowRadius: 15,
     elevation: 6,
   },
+  
+  // --- SYLES DU MODE SWIPE (TINDER) ---
+  // --- SYLES DU MODE SWIPE (TINDER) ---
+  swipeContainer: {
+    width: CARD_WIDTH,
+    height: '70%' ,
+    borderRadius: 32, // Plus arrondi
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+    borderWidth: 1, borderColor: '#fff' // Bordure blanche subtile
+  },
+  swipeImage: { width:CARD_WIDTH, height: '100%' },
+  // Dégradé plus doux juste pour assurer la lisibilité si le texte dépasse
+  swipeGradient: { position: 'absolute', bottom: 0, width: '100%', height: '40%' },
+  
+  // Contenu façon "Carte flottante" en bas
+  // Contenu façon "Carte flottante" en bas
+  swipeContentWrapper: {
+      position: 'absolute', bottom: 20, left: 20, right: 20,
+      shadowColor: "#939191", 
+      shadowOffset: { width: 0, height: 4 }, 
+      shadowOpacity: 0.2,
+      shadowRadius: 8,
+      elevation: 5,
+      backgroundColor: 'transparent'
+  },
+  swipeContentBlur: {
+      padding: 20,
+      borderRadius: 24,
+      overflow: 'hidden', // IMPORTANT pour l'arrondi du BlurView
+      backgroundColor: 'rgba(255, 255, 255, 0.45)', // Effet givré
+      borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)'
+  },
+  
+  swipeTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
+  
+  swipeTitle: { 
+      fontSize: 22, fontWeight: '800', color: '#1A1A1A', 
+      flex: 1, marginRight: 10, lineHeight: 26
+  },
+
+  swipeRow: { flexDirection: 'row', gap: 10, marginBottom: 15, marginTop: 5 },
+  swipeIconInfo: { 
+      flexDirection: 'row', alignItems: 'center', gap: 6, 
+      backgroundColor: '#F5F5F7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12,
+  },
+  swipeText: { color: '#1A1A1A', fontWeight: '700', fontSize: 12 },
+  
+  swipeTagContainer: {
+      position: 'absolute', top: 20, left: 20, // Tag en haut à gauche
+      backgroundColor: '#1A1A1A', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+      shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4
+  },
+  swipeTagProp: { fontSize: 11, fontWeight: '800', color: '#fff', textTransform: 'uppercase', letterSpacing: 0.5 },
+
+  swipePriceContainer: {  flexDirection: 'row', alignItems: 'baseline', alignSelf: 'flex-end' },
+  swipePriceLabel:{ fontSize: 13, fontWeight: '500' },
+  swipePrice: { fontSize: 20, fontWeight: '900', color: '#4dbe84ff' },
 
   imageWrapper: {
     height: IMAGE_HEIGHT, 

@@ -14,6 +14,15 @@ import TripDetailsScreen from '../screens/DetailsScreen';
 import CreateTripScreen from '../screens/CreateTripScreen';
 import GeneratedTripScreen from '../screens/GeneratedTripScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import ProfileScreen from '../screens/ProfileScreen';
+import EditProfileScreen from '../screens/EditProfileScreen';
+import SecurityScreen from '../screens/SecurityScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
+import InvestmentsScreen from '../screens/InvestmentsScreen';
+import SupportScreen from '../screens/SupportScreen';
+
+// Import de ton contexte
+import { FavoritesProvider } from '../context/FavoritesContext';
 
 const Stack = createStackNavigator();
 
@@ -47,62 +56,87 @@ const AppNavigator = () => {
   }
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator 
-        // Si un jeton est présent, on commence sur Main, sinon Onboarding
-        initialRouteName={userToken ? "Main" : "Onboarding"}
-        screenOptions={{ headerShown: false }}
-      >
+    <FavoritesProvider>
+      <NavigationContainer>
+        <Stack.Navigator 
+          // Si un jeton est présent, on commence sur Main, sinon Onboarding
+          initialRouteName={userToken ? "Main" : "Onboarding"}
+          screenOptions={{ headerShown: false }}
+        >
+  
+          {/* 1. Écran de Démarrage */}
+          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+  
+          {/* 2. L'application principale (Navbar) */}
+          <Stack.Screen name="Main" component={TabNavigator} />
+  
+          {/* Flux d'Auth */}
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="Signup" component={SignupScreen} />
+                
+          {/* 3. Écran de détail (Modal) */}
+          <Stack.Screen 
+            name="TripDetails" 
+            component={TripDetailsScreen} 
+            options={{ presentation: 'modal' }} 
+          />
+  
+          {/* 4. Écran de Création (Modal) */}
+          <Stack.Screen 
+            name="CreateTrip" 
+            component={CreateTripScreen} 
+            options={{ 
+              presentation: 'modal',
+              gestureEnabled: true,
+            }} 
+          />
+  
+          {/* 5. Écran de Résultat Généré */}
+          <Stack.Screen 
+            name="GeneratedTrip" 
+            component={GeneratedTripScreen} 
+            options={{ 
+              presentation: 'card', 
+              gestureEnabled: false 
+            }} 
+          />
+          
+           {/* 6. Écran de Paramètres */}
+          <Stack.Screen 
+            name="Settings" 
+            component={SettingsScreen} 
+            options={{ 
+              presentation: 'card',
+              gestureEnabled: true 
+            }} 
+          />
+          
+          {/* 7. Profil Public (Poussé depuis les détails) */}
+          <Stack.Screen 
+            name="UserProfile" 
+            component={ProfileScreen} 
+            options={{ 
+              headerShown: false,
+              presentation: 'card'
+            }} 
+          />
+          
+          {/* ÉDITER PROFIL */}
+          <Stack.Screen 
+            name="EditProfile" 
+            component={EditProfileScreen} 
+            options={{ presentation: 'modal' }} 
+          />
 
-        {/* 1. Écran de Démarrage */}
-        <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-
-        {/* 2. L'application principale (Navbar) */}
-        <Stack.Screen name="Main" component={TabNavigator} />
-
-        {/* Flux d'Auth */}
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Signup" component={SignupScreen} />
-              
-        {/* 3. Écran de détail (Modal) */}
-        <Stack.Screen 
-          name="TripDetails" 
-          component={TripDetailsScreen} 
-          options={{ presentation: 'modal' }} 
-        />
-
-        {/* 4. Écran de Création (Modal) */}
-        <Stack.Screen 
-          name="CreateTrip" 
-          component={CreateTripScreen} 
-          options={{ 
-            presentation: 'modal',
-            gestureEnabled: true,
-          }} 
-        />
-
-        {/* 5. Écran de Résultat Généré */}
-        <Stack.Screen 
-          name="GeneratedTrip" 
-          component={GeneratedTripScreen} 
-          options={{ 
-            presentation: 'card', 
-            gestureEnabled: false 
-          }} 
-        />
-        
-         {/* 6. Écran de Paramètres */}
-        <Stack.Screen 
-          name="Settings" 
-          component={SettingsScreen} 
-          options={{ 
-            presentation: 'card',
-            gestureEnabled: true 
-          }} 
-        />
-        
-      </Stack.Navigator>
-    </NavigationContainer>
+          {/* PARAMÈTRES DÉTAILLÉS */}
+          <Stack.Screen name="Security" component={SecurityScreen} />
+          <Stack.Screen name="Notifications" component={NotificationsScreen} />
+          <Stack.Screen name="Investments" component={InvestmentsScreen} />
+          <Stack.Screen name="Support" component={SupportScreen} />
+          
+        </Stack.Navigator>
+      </NavigationContainer>
+    </FavoritesProvider>
   );
 };
 

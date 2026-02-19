@@ -1,28 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, Dimensions, StatusBar, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, StatusBar, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Animated } from 'react-native';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
-import { generateTrip, getAlternativeActivity } from '../utils/TripGenerator';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
+import { generateTrip, getAlternativeActivity, generateDayPlan } from '../utils/TripGenerator';
+import client from '../api/client';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
+const HEADER_HEIGHT = height * 0.4;
+const CARD_WIDTH = width - 40;
 
 const GeneratedTripScreen = ({ route, navigation }) => {
-  const { vibes, days, travelers, budget, aiData } = route.params || {};
+  const { vibes, days, travelers, budget, aiData, originalTripId, startDate } = route.params || {};
 
   if (!aiData) return null;
 
-  // --- INITIALISATION DES DONNÉES (Transformation en liste) ---
-  // On transforme le format "1 activité" en "Tableau d'activités" pour pouvoir en ajouter
+  // --- INITIALISATION DES DONNÉES ---
   const [tripData, setTripData] = useState(() => {
     const formattedData = { ...aiData };
     formattedData.days = formattedData.days.map(day => ({
       ...day,
-      // Si 'activities' existe déjà on garde, sinon on crée un tableau avec l'activité unique
       activities: day.activities || [{ 
         title: day.activityTitle, 
         desc: day.activityDesc, 
-        image: `https://source.unsplash.com/random/200x100?travel` // On ajoute une image par défaut
+        image: `https://source.unsplash.com/random/200x100?travel` 
       }]
     }));
     return formattedData;
@@ -31,15 +36,176 @@ const GeneratedTripScreen = ({ route, navigation }) => {
   const [currentDays, setCurrentDays] = useState(days);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   
-  // MODALE ÉDITION
+  // MODALE TITRE VOYAGE
+  const [tripTitle, setTripTitle] = useState(tripData.destination || tripData.title || "Mon Voyage");
+  const [editTitleModalVisible, setEditTitleModalVisible] = useState(false);
+  const [tempTripTitle, setTempTripTitle] = useState('');
+
+  // MODALE ÉDITION ACTIVITÉ
   const [editCardModalVisible, setEditCardModalVisible] = useState(false);
   const [editingIndices, setEditingIndices] = useState({ day: null, act: null });
   const [tempTitle, setTempTitle] = useState('');
   const [tempDesc, setTempDesc] = useState('');
 
-  // --- ACTIONS ---
+  // SAUVEGARDE
+  const [isSaving, setIsSaving] = useState(false);
 
-  // 1. AJOUTER UNE ACTIVITÉ (+)
+  // IMAGE
+  const [tripImage, setTripImage] = useState(tripData.image);
+
+  // SCROLL ANIMATION
+  const scrollY = useRef(new Animated.Value(0)).current;
+
+  // FONCTION UPLOAD
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission refusée', 'Besoin d\'accès à la galerie.');
+      return;
+    }
+
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.7,
+    });
+
+    if (!result.canceled) {
+        const localUri = result.assets[0].uri;
+        
+        // Création FormData
+        const formData = new FormData();
+        formData.append('image', {
+            uri: localUri,
+            name: 'upload.jpg',
+            type: 'image/jpeg',
+        });
+
+        try {
+            // Upload vers le backend
+            const response = await client.post('/upload', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            // Hack: récupérer la racine du serveur depuis baseURL
+            const baseUrl = client.defaults.baseURL.replace('/api', ''); 
+            const serverImageUrl = baseUrl + response.data.imageUrl;
+            
+            setTripImage(serverImageUrl);
+            setTripData(prev => ({ ...prev, image: serverImageUrl }));
+
+        } catch (error) {
+            console.error("Upload error:", error);
+            Alert.alert("Erreur", "Echec de l'upload.");
+        }
+    }
+  };
+
+  const handleSaveTrip = async () => {
+      setIsSaving(true);
+      try {
+          const token = await AsyncStorage.getItem('userToken');
+          if (!token) {
+              Alert.alert("Connexion requise", "Connectez-vous pour sauvegarder votre voyage.");
+              setIsSaving(false);
+              return;
+          }
+
+          let flatSteps = [];
+          
+          let globalOrderIndex = 1;
+
+          tripData.days.forEach((dayItem, dayIndex) => {
+              dayItem.activities.forEach((act, actIndex) => {
+                  flatSteps.push({
+                      orderIndex: globalOrderIndex++,
+                      day: dayItem.day,
+                      title: act.title || "Activité", 
+                      description: act.desc,
+                      type: 'activity', 
+                      imageUrl: act.image && act.image.startsWith('http') ? act.image : null
+                  });
+              });
+          });
+
+          const payload = {
+              title: tripTitle,
+              description: `Voyage de ${currentDays} jours${travelers ? ` pour ${travelers} personnes` : ''}.`,
+              distanceKm: 0,
+              durationDays: parseInt(currentDays),
+              budgetEuro: typeof budget?.label === 'string' && budget.label.includes('€') ? parseInt(budget.label.replace(/[^0-9]/g, '')) || 0 : 0,
+              imageUrl: tripImage || tripData.image, 
+              tags: vibes || [],
+              isPublic: false,
+              startDate: startDate, 
+              status: 'PLANNED',
+              originalTrip: originalTripId ? { connect: { id: parseInt(originalTripId) } } : undefined,
+              steps: flatSteps
+          };
+
+          const response = await client.post('/trips', payload);
+
+          if (response.status === 201) {
+              const newTrip = response.data;
+              Alert.alert(
+                  "Voyage enregistré ! 🎒",
+                  "Votre voyage est sauvegardé. Voulez-vous le rendre public ?",
+                  [
+                      { text: "Garder privé 🔒", style: "cancel", onPress: () => navigation.replace('TripDetails', { trip: newTrip, isOwner: true }) },
+                      { text: "Publier 🌍", onPress: async () => {
+                              try {
+                                  const updated = await client.put(`/trips/${newTrip.id}`, { isPublic: true });
+                                  Alert.alert("Publié !", "Votre voyage est maintenant visible.");
+                                  navigation.replace('TripDetails', { trip: updated.data, isOwner: true });
+                              } catch (err) {
+                                  Alert.alert("Erreur", "Sauvegardé mais non publié.");
+                                  navigation.replace('TripDetails', { trip: newTrip, isOwner: true });
+                              }
+                          }
+                      }
+                  ]
+              );
+          }
+      } catch (error) {
+          console.error("Erreur sauvegarde:", error);
+          Alert.alert("Erreur", error.response?.data?.details || "Impossible de sauvegarder.");
+      } finally {
+          setIsSaving(false);
+      }
+  };
+
+  const openTitleEdit = () => {
+      setTempTripTitle(tripTitle);
+      setEditTitleModalVisible(true);
+  };
+
+  const saveTitleEdit = () => {
+      if (tempTripTitle.trim()) {
+        setTripTitle(tempTripTitle);
+      }
+      setEditTitleModalVisible(false);
+  };
+
+  // ... (ACTIONS INCHANGÉES)
+
+  // ... (RENDER UI)
+  
+  // IN HEADER:
+  /*
+  <View style={styles.headerTitles}>
+    <View style={styles.tagBadge}>...</View>
+    <TouchableOpacity onPress={openTitleEdit} style={{flexDirection: 'row', alignItems: 'center'}}>
+        <Text style={styles.mainTitle}>{tripTitle}</Text>
+        <Ionicons name="pencil" size={20} color="#fff" style={{marginLeft: 10, opacity: 0.8}} />
+    </TouchableOpacity>
+    <Text style={styles.subTitle}>...</Text>
+  </View>
+  */
+  
+  // ADD MODAL AT END
+
+
+  // --- ACTIONS (Inchangées) ---
   const handleAddActivity = (dayIndex) => {
     const newTrip = { ...tripData };
     newTrip.days[dayIndex].activities.push({
@@ -48,19 +214,13 @@ const GeneratedTripScreen = ({ route, navigation }) => {
       image: `https://source.unsplash.com/random/200x100?sig=${Math.random()}`
     });
     setTripData(newTrip);
-    
-    // On ouvre directement l'éditeur pour la nouvelle activité
     openEditCard(dayIndex, newTrip.days[dayIndex].activities.length - 1);
   };
 
-  // 2. SUPPRIMER UNE ACTIVITÉ (Poubelle)
   const handleDeleteActivity = (dayIndex, actIndex) => {
     Alert.alert("Supprimer ?", "Voulez-vous retirer cette activité ?", [
       { text: "Annuler", style: "cancel" },
-      { 
-        text: "Supprimer", 
-        style: 'destructive',
-        onPress: () => {
+      { text: "Supprimer", style: 'destructive', onPress: () => {
           const newTrip = { ...tripData };
           newTrip.days[dayIndex].activities.splice(actIndex, 1);
           setTripData(newTrip);
@@ -69,7 +229,6 @@ const GeneratedTripScreen = ({ route, navigation }) => {
     ]);
   };
 
-  // 3. ÉDITER UNE ACTIVITÉ (Crayon)
   const openEditCard = (dayIndex, actIndex) => {
     const activity = tripData.days[dayIndex].activities[actIndex];
     setEditingIndices({ day: dayIndex, act: actIndex });
@@ -81,128 +240,148 @@ const GeneratedTripScreen = ({ route, navigation }) => {
   const saveCardEdit = () => {
     const newTrip = { ...tripData };
     const { day, act } = editingIndices;
-    newTrip.days[day].activities[act].title = tempTitle;
-    newTrip.days[day].activities[act].desc = tempDesc;
-    setTripData(newTrip);
+    if (day !== null && act !== null) {
+        newTrip.days[day].activities[act].title = tempTitle;
+        newTrip.days[day].activities[act].desc = tempDesc;
+        setTripData(newTrip);
+    }
     setEditCardModalVisible(false);
   };
 
-  // 4. SWAP (IA)
   const handleSwapActivity = (dayIndex, actIndex) => {
     const currentActivity = tripData.days[dayIndex].activities[actIndex].title;
     const newTitle = getAlternativeActivity(tripData.destination, currentActivity);
-    
     const newTrip = { ...tripData };
     newTrip.days[dayIndex].activities[actIndex].title = newTitle;
     setTripData({ ...newTrip });
   };
 
-  // 5. RÉGÉNÉRER TOUT (Reset)
   const handleRegenerate = (newDays) => {
     const newData = generateTrip(vibes, parseInt(newDays), travelers, budget);
-    // On reformate immédiatement
     newData.days = newData.days.map(d => ({
       ...d,
       activities: [{ title: d.activityTitle, desc: d.activityDesc, image: `https://source.unsplash.com/random/200x100?travel` }]
     }));
-    
     setTripData(newData);
     setCurrentDays(parseInt(newDays));
     setSettingsModalVisible(false);
   };
 
-  // 6. DÉPLACER UNE ACTIVITÉ (Monter/Descendre)
   const moveActivity = (dayIndex, fromIndex, direction) => {
     const newTrip = { ...tripData };
     const activities = newTrip.days[dayIndex].activities;
     const toIndex = fromIndex + direction;
-
-    // Vérification des limites (ne pas monter le premier ou descendre le dernier)
     if (toIndex < 0 || toIndex >= activities.length) return;
-
-    // On échange les deux éléments (Swap)
     const itemToMove = activities[fromIndex];
-    activities.splice(fromIndex, 1); // On l'enlève
-    activities.splice(toIndex, 0, itemToMove); // On le remet à la nouvelle place
-
+    activities.splice(fromIndex, 1);
+    activities.splice(toIndex, 0, itemToMove);
     setTripData(newTrip);
   };
 
-  // Petit menu pour choisir la direction quand on clique sur la poignée
   const handleDragPress = (dayIndex, actIndex) => {
-    Alert.alert(
-      "Déplacer l'activité",
-      "Où voulez-vous mettre cette activité ?",
-      [
+    Alert.alert("Réorganiser", "Déplacer cette activité :", [
         { text: "Annuler", style: "cancel" },
         { text: "Monter ⬆️", onPress: () => moveActivity(dayIndex, actIndex, -1) },
         { text: "Descendre ⬇️", onPress: () => moveActivity(dayIndex, actIndex, 1) }
-      ]
-    );
+    ]);
   };
 
+  const handleAutoFillDay = (dayIndex) => {
+    Alert.alert("Magie ✨", "Remplir ce jour automatiquement ?", [
+        { text: "Annuler", style: "cancel" },
+        { text: "Remplir", onPress: () => {
+            const newActivities = generateDayPlan(tripData.destination);
+            const newTrip = { ...tripData };
+            // On s'assure d'avoir des objets conformes
+            newTrip.days[dayIndex].activities = newActivities;
+            setTripData(newTrip);
+        }}
+    ]);
+  };
 
-  // --- RENDU ITINÉRAIRE ---
+  // --- RENDU UI PREMIUM ---
+
   const renderItinerary = () => {
     return tripData.days.map((dayItem, dayIndex) => (
-      <View key={dayIndex} style={styles.dayBlock}>
+      <View key={dayIndex} style={styles.daySection}>
         
-        {/* Ligne Temporelle (gauche) */}
-        <View style={styles.timelineLeft}>
-          <View style={styles.timelineDot} />
-          <View style={styles.timelineLine} />
+        {/* EN-TÊTE JOUR (Sticky look) */}
+        <View style={styles.dayHeader}>
+            <View style={{flexDirection: 'row', alignItems: 'center', flex:1}}>
+                <View style={styles.dayBadge}>
+                    <Text style={styles.dayBadgeText}>J{dayItem.day}</Text>
+                </View>
+                <Text style={styles.dayTitleLabel}>Jour {dayItem.day}</Text>
+            </View>
+            
+            <TouchableOpacity onPress={() => handleAutoFillDay(dayIndex)} style={{backgroundColor: '#E8F5E9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, flexDirection: 'row', alignItems: 'center'}}>
+                <Ionicons name="sparkles" size={14} color="#00D668" />
+                <Text style={{color: '#00D668', fontWeight: 'bold', fontSize: 12, marginLeft: 6}}>Remplir (IA)</Text>
+            </TouchableOpacity>
         </View>
 
-        <View style={styles.dayContent}>
-          <Text style={styles.dayTitle}>Jour {dayItem.day}</Text>
+        <View style={styles.dayBody}>
+            {/* Ligne verticale continue */}
+            <View style={styles.timelineLine} />
 
-          {/* LISTE DES ACTIVITÉS DU JOUR */}
-          {dayItem.activities.map((act, actIndex) => (
-            <View key={actIndex} style={styles.activityCard}>
-              
-              {/* 👇 NOUVEAU : LE DRAG HANDLE (Barre verte + Points) */}
-              <TouchableOpacity 
-                style={styles.dragHandle} 
-                onPress={() => handleDragPress(dayIndex, actIndex)}
-                activeOpacity={0.6}
-              >
-                <View style={styles.dragBar} />
-                <Ionicons name="grid" size={12} color="#D1D1D6" style={{ marginLeft: 2 }} />
-              </TouchableOpacity>
+            {/* LISTE ACTIVITÉS */}
+            <View style={styles.activitiesList}>
+                {dayItem.activities && dayItem.activities.map((act, actIndex) => (
+                    <View key={actIndex} style={styles.activityRow}>
+                        
+                        {/* Point sur la timeline */}
+                        <View style={styles.timelineDot} />
+                        
+                        <View style={styles.activityCard}>
+                             {/* Image Header */}
+                             <View style={styles.cardImageContainer}>
+                                <Image source={{ uri: act.image || `https://source.unsplash.com/random/400x200?travel` }} style={styles.cardImage} contentFit="cover" transition={500} />
+                                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.7)']} style={styles.cardGradient} />
+                                
+                                <TouchableOpacity style={styles.dragBtn} onPress={() => handleDragPress(dayIndex, actIndex)}>
+                                    <Ionicons name="reorder-two" size={20} color="#fff" />
+                                </TouchableOpacity>
 
-              {/* IMAGE */}
-              <Image 
-                source={{ uri: act.image || `https://source.unsplash.com/random/200x100?travel` }} 
-                style={styles.activityImage} 
-              />
-              
-              {/* TEXTES */}
-              <View style={styles.activityInfo}>
-                <Text style={styles.activityTitle} numberOfLines={2}>{act.title}</Text>
-                <Text style={styles.activityDesc} numberOfLines={2}>{act.desc}</Text>
-              </View>
+                                <Text style={styles.cardTitleOverImage} numberOfLines={2}>{act.title}</Text>
+                             </View>
 
-              {/* ACTIONS (Crayon, Swap, Poubelle) */}
-              <View style={styles.actionsColumn}>
-                <TouchableOpacity style={styles.actionBtn} onPress={() => openEditCard(dayIndex, actIndex)}>
-                  <Ionicons name="pencil" size={14} color="#1A1A1A" />
+                             {/* Content Body */}
+                             <View style={styles.cardContent}>
+                                <Text style={styles.cardDesc} numberOfLines={3}>{act.desc}</Text>
+                                
+                                {/* Action Bar */}
+                                <View style={styles.actionBar}>
+                                    <TouchableOpacity style={styles.actionPill} onPress={() => openEditCard(dayIndex, actIndex)}>
+                                        <Ionicons name="create-outline" size={16} color="#333" />
+                                        <Text style={styles.actionText}>Éditer</Text>
+                                    </TouchableOpacity>
+                                    
+                                    <View style={styles.verticalDivider} />
+
+                                    <TouchableOpacity style={styles.actionPill} onPress={() => handleSwapActivity(dayIndex, actIndex)}>
+                                        <MaterialCommunityIcons name="magic-staff" size={16} color="#00D668" />
+                                        <Text style={[styles.actionText, {color: '#00D668'}]}>Remix IA</Text>
+                                    </TouchableOpacity>
+
+                                    <View style={{flex:1}}/>
+
+                                    <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDeleteActivity(dayIndex, actIndex)}>
+                                        <Ionicons name="trash-outline" size={16} color="#FF3B30" />
+                                    </TouchableOpacity>
+                                </View>
+                             </View>
+                        </View>
+                    </View>
+                ))}
+
+                {/* BOUTON AJOUT STYLÉ */}
+                <TouchableOpacity style={styles.addActivityBtn} onPress={() => handleAddActivity(dayIndex)}>
+                    <View style={styles.addIconCircle}>
+                        <Ionicons name="add" size={24} color="#fff" />
+                    </View>
+                    <Text style={styles.addText}>Ajouter une étape</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionBtn, {marginTop: 6}]} onPress={() => handleSwapActivity(dayIndex, actIndex)}>
-                  <Ionicons name="sync" size={14} color="#00D668" />
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionBtn, {marginTop: 6, backgroundColor:'#FFEBEE'}]} onPress={() => handleDeleteActivity(dayIndex, actIndex)}>
-                  <Ionicons name="trash" size={14} color="#FF3B30" />
-                </TouchableOpacity>
-              </View>
             </View>
-          ))}
-
-          {/* BOUTON AJOUTER (+) */}
-          <TouchableOpacity style={styles.addBtn} onPress={() => handleAddActivity(dayIndex)}>
-            <Ionicons name="add-circle" size={20} color="#00D668" />
-            <Text style={styles.addBtnText}>Ajouter une activité</Text>
-          </TouchableOpacity>
-          
         </View>
       </View>
     ));
@@ -210,88 +389,164 @@ const GeneratedTripScreen = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       
-      {/* HEADER (Identique) */}
+      {/* HEADER PARALLAX */}
       <View style={styles.headerContainer}>
-        <Image source={{ uri: tripData.image }} style={styles.headerImage} />
-        <View style={styles.overlay} />
+        <Image source={{ uri: tripImage || tripData.image }} style={styles.headerImage} contentFit="cover" transition={500} />
+        <LinearGradient colors={['rgba(0,0,0,0.3)', 'transparent', '#FAFAFA']} style={styles.headerGradient} />
+        
         <SafeAreaView style={styles.headerSafeArea}>
-          <TouchableOpacity onPress={() => navigation.navigate('Main')} style={styles.iconButton}>
-            <Ionicons name="close" size={24} color="#fff" />
-          </TouchableOpacity>
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            <TouchableOpacity style={styles.iconButton} onPress={() => setSettingsModalVisible(true)}>
-              <Ionicons name="options" size={24} color="#fff" />
-            </TouchableOpacity>
-          </View>
+            <View style={styles.headerTopRow}>
+                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.glassBtn}>
+                    <Ionicons name="arrow-back" size={24} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.glassBtn}>
+                    <Ionicons name="settings-outline" size={24} color="#fff" />
+                </TouchableOpacity>
+            </View>
+
+            <View style={styles.headerTitles}>
+                <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
+                    <View style={styles.tagBadge}>
+                        <Ionicons name="planet" size={12} color="#00D668" />
+                        <Text style={styles.tagText}>MODE REMIX</Text>
+                    </View>
+                    <TouchableOpacity onPress={pickImage} style={[styles.glassBtn, {width: 'auto', paddingHorizontal: 15, flexDirection: 'row', gap: 8}]}>
+                        <Ionicons name="camera" size={20} color="#fff" />
+                        <Text style={{color: '#fff', fontWeight: 'bold', fontSize: 12}}>Changer photo</Text>
+                    </TouchableOpacity>
+                </View>
+                <TouchableOpacity onPress={openTitleEdit} style={{flexDirection: 'row', alignItems: 'center'}}>
+                    <Text style={styles.mainTitle}>{tripTitle}</Text>
+                    <Ionicons name="pencil" size={24} color="#fff" style={{marginLeft: 10, opacity: 0.8, marginBottom: 5}} />
+                </TouchableOpacity>
+                <Text style={styles.subTitle}>{currentDays} Jours • {travelers || 1} Voyageurs</Text>
+            </View>
         </SafeAreaView>
-        <View style={styles.headerTexts}>
-          <View style={styles.tagContainer}>
-            <Text style={styles.tagText}>Editable ✍️</Text>
-          </View>
-          <Text style={styles.tripTitle}>{tripData.destination}</Text>
-          <Text style={styles.tripSubtitle}>{currentDays} Jours • {travelers} Pers.</Text>
+      </View>
+
+      {/* CONTENU SCROLLABLE */}
+      <Animated.ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
+        scrollEventThrottle={16}
+      >
+        <View style={styles.introSection}>
+            <Text style={styles.sectionHeaderTitle}>Votre Itinéraire</Text>
+            <Text style={styles.sectionHeaderSub}>Personnalisez chaque étape selon vos envies.</Text>
         </View>
-      </View>
 
-      {/* BODY SCROLLABLE */}
-      <View style={styles.bodyContainer}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Votre Planning</Text>
-            <Text style={styles.hintText}>Customisez chaque journée</Text>
-          </View>
-          
-          <View style={styles.timelineWrapper}>
+        <View style={styles.timelineWrapper}>
             {renderItinerary()}
-          </View>
+        </View>
 
-          <View style={{ height: 100 }} />
-        </ScrollView>
-      </View>
+        <View style={{ height: 120 }} />
+      </Animated.ScrollView>
 
-      {/* FOOTER */}
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.bookButton} onPress={() => alert('Voyage sauvegardé !')}>
-          <Text style={styles.bookText}>Valider le Voyage</Text>
-          <Ionicons name="checkmark-circle" size={24} color="#fff" />
+      {/* FOOTER FLOTTANT */}
+      <BlurView intensity={20} tint="light" style={styles.floatingFooter}>
+        <TouchableOpacity 
+            style={[styles.validateBtn, isSaving && styles.validateBtnDisabled]} 
+            onPress={handleSaveTrip}
+            disabled={isSaving}
+        >
+            {isSaving ? (
+                 <Text style={styles.validateText}>Sauvegarde en cours...</Text>
+            ) : (
+                <>  
+                    <Text style={styles.validateText}>Valider mon Remix</Text>
+                    <View style={styles.validateIconBox}>
+                        <Ionicons name="arrow-forward" size={20} color="#000" />
+                    </View>
+                </>
+            )}
         </TouchableOpacity>
-      </View>
+      </BlurView>
 
-      {/* MODALE DUREE */}
+      {/* MODALE DURÉE */}
       <Modal animationType="slide" transparent={true} visible={settingsModalVisible} onRequestClose={() => setSettingsModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <BlurView intensity={20} style={StyleSheet.absoluteFill} />
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Modifier la durée</Text>
-            <View style={styles.inputRow}>
-              <TouchableOpacity onPress={() => setCurrentDays(Math.max(1, currentDays - 1))} style={styles.plusMinusBtn}><Ionicons name="remove" size={24} /></TouchableOpacity>
-              <Text style={styles.daysValue}>{currentDays}j</Text>
-              <TouchableOpacity onPress={() => setCurrentDays(currentDays + 1)} style={styles.plusMinusBtn}><Ionicons name="add" size={24} /></TouchableOpacity>
+            <Text style={styles.modalTitle}>Ajuster la durée ⏳</Text>
+            <View style={styles.counterRow}>
+                <TouchableOpacity onPress={() => setCurrentDays(Math.max(1, currentDays - 1))} style={styles.counterBtn}>
+                    <Ionicons name="remove" size={24} color="#1A1A1A" />
+                </TouchableOpacity>
+                <Text style={styles.counterValue}>{currentDays}j</Text>
+                <TouchableOpacity onPress={() => setCurrentDays(currentDays + 1)} style={styles.counterBtn}>
+                    <Ionicons name="add" size={24} color="#1A1A1A" />
+                </TouchableOpacity>
             </View>
             <TouchableOpacity style={styles.regenerateBtn} onPress={() => handleRegenerate(currentDays)}>
-              <Text style={styles.regenerateText}>Régénérer (Reset)</Text>
+                <MaterialCommunityIcons name="robot-outline" size={24} color="#fff" style={{marginRight: 10}} />
+                <Text style={styles.regenerateText}>Régénérer l'itinéraire</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setSettingsModalVisible(false)}><Text style={styles.cancelText}>Annuler</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setSettingsModalVisible(false)} style={styles.closeModalBtn}>
+                <Text style={styles.closeModalText}>Fermer</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* MODALE TEXTE */}
+      {/* MODALE TITRE VOYAGE */}
+      <Modal animationType="fade" transparent={true} visible={editTitleModalVisible} onRequestClose={() => setEditTitleModalVisible(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
+          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+          <View style={[styles.editModalCard, { alignItems: 'center' }]}>
+            <Text style={[styles.editTitle, { marginBottom: 20 }]}>Nom du voyage ✏️</Text>
+            
+            <TextInput 
+                style={[styles.inputField, { width: '100%', textAlign: 'center', fontSize: 20 }]} 
+                value={tempTripTitle} 
+                onChangeText={setTempTripTitle} 
+                placeholder="Ex: Roadtrip en Italie..." 
+                autoFocus
+            />
+
+            <View style={{flexDirection: 'row', gap: 10, marginTop: 10}}>
+                <TouchableOpacity style={[styles.saveEditBtn, {backgroundColor: '#ccc', flex:1}]} onPress={() => setEditTitleModalVisible(false)}>
+                    <Text style={[styles.saveEditText, {color: '#333'}]}>Annuler</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.saveEditBtn, {flex:1}]} onPress={saveTitleEdit}>
+                    <Text style={styles.saveEditText}>Valider</Text>
+                </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* MODALE ÉDITION ACTIVITÉ */}
       <Modal animationType="fade" transparent={true} visible={editCardModalVisible} onRequestClose={() => setEditCardModalVisible(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
-          <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
-          <View style={styles.editCardModal}>
-            <Text style={styles.modalTitle}>Modifier l'activité 📝</Text>
-            <Text style={styles.label}>Titre</Text>
-            <TextInput style={styles.inputTitle} value={tempTitle} onChangeText={setTempTitle} />
-            <Text style={styles.label}>Description</Text>
-            <TextInput style={styles.inputDesc} value={tempDesc} onChangeText={setTempDesc} multiline numberOfLines={3} />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.cancelBtnSmall} onPress={() => setEditCardModalVisible(false)}><Text style={{color:'#666'}}>Annuler</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.saveBtnSmall} onPress={saveCardEdit}><Text style={{color:'#fff', fontWeight:'bold'}}>OK</Text></TouchableOpacity>
+          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+          <View style={styles.editModalCard}>
+            <View style={styles.editHeader}>
+                <Text style={styles.editTitle}>Modifier l'activité</Text>
+                <TouchableOpacity onPress={() => setEditCardModalVisible(false)}>
+                    <Ionicons name="close-circle" size={28} color="#ccc" />
+                </TouchableOpacity>
             </View>
+            
+            <Text style={styles.inputLabel}>Titre</Text>
+            <TextInput style={styles.inputField} value={tempTitle} onChangeText={setTempTitle} placeholder="Titre de l'étape" />
+            
+            <Text style={styles.inputLabel}>Description</Text>
+            <TextInput 
+                style={[styles.inputField, styles.textArea]} 
+                value={tempDesc} 
+                onChangeText={setTempDesc} 
+                multiline 
+                textAlignVertical="top" 
+                placeholder="Détails de l'activité..." 
+            />
+
+            <TouchableOpacity style={styles.saveEditBtn} onPress={saveCardEdit}>
+                <Text style={styles.saveEditText}>Enregistrer</Text>
+            </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -304,72 +559,89 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FAFAFA' },
   
   // HEADER
-  headerContainer: { height: height * 0.35, width: width },
-  headerImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)' },
-  headerSafeArea: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10 },
-  iconButton: { width: 45, height: 45, borderRadius: 25, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
-  headerTexts: { position: 'absolute', bottom: 30, left: 20, right: 20 },
-  tagContainer: { backgroundColor: '#1A1A1A', alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginBottom: 10 },
-  tagText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-  tripTitle: { fontSize: 32, fontWeight: '900', color: '#fff', textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 10 },
-  tripSubtitle: { fontSize: 16, color: 'rgba(255,255,255,0.9)', fontWeight: '600' },
-
-  // BODY
-  bodyContainer: { flex: 1, marginTop: -25, backgroundColor: '#FAFAFA', borderTopLeftRadius: 30, borderTopRightRadius: 30, overflow: 'hidden' },
-  scrollContent: { padding: 25 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  sectionTitle: { fontSize: 20, fontWeight: 'bold', color: '#1A1A1A' },
-  hintText: { fontSize: 12, color: '#8E8E93' },
-
-  // BLOC JOUR
-  dayBlock: { flexDirection: 'row', marginBottom: 20 },
-  timelineLeft: { alignItems: 'center', width: 30, marginRight: 10 },
-  timelineDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#1A1A1A', borderWidth: 3, borderColor: '#fff', zIndex: 2 },
-  timelineLine: { width: 2, flex: 1, backgroundColor: '#E5E5EA', marginVertical: -2, zIndex: 1 },
+  headerContainer: { height: HEADER_HEIGHT, width: '100%', position: 'absolute', top: 0, zIndex: 0 },
+  headerImage: { width: '100%', height: '100%' },
+  headerGradient: { position: 'absolute', top: 0, width: '100%', height: '100%' },
+  headerSafeArea: { flex: 1, justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 40 },
+  headerTopRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
+  glassBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
   
-  dayContent: { flex: 1 },
-  dayTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A1A1A', marginBottom: 10, marginTop: -4 },
+  headerTitles: { marginTop: 20 },
+  tagBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  tagText: { color: '#00D668', fontWeight: '800', fontSize: 10, marginLeft: 6, letterSpacing: 0.5 },
+  mainTitle: { fontSize: 36, fontWeight: '900', color: '#fff', textShadowColor: 'rgba(0,0,0,0.3)', textShadowOffset: {width: 0, height: 2}, textShadowRadius: 10, marginBottom: 5 },
+  subTitle: { fontSize: 16, color: 'rgba(255,255,255,0.9)', fontWeight: '600' },
 
-  // CARTE ACTIVITÉ
-  activityCard: { 
-    backgroundColor: '#fff', borderRadius: 15, padding: 10, flexDirection: 'row', 
-    shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 5, elevation: 2,
-    alignItems: 'center', marginBottom: 10 
-  },
-  activityImage: { width: 60, height: 60, borderRadius: 10, marginRight: 12, backgroundColor: '#eee' },
-  activityInfo: { flex: 1, marginRight: 5 },
-  activityTitle: { fontSize: 14, fontWeight: 'bold', color: '#333', marginBottom: 2 },
-  activityDesc: { fontSize: 12, color: '#8E8E93' },
+  // SCROLL
+  scrollView: { flex: 1, marginTop: HEADER_HEIGHT - 30, borderTopLeftRadius: 32, borderTopRightRadius: 32, backgroundColor: '#FAFAFA', overflow: 'hidden' },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 30 },
   
-  // ACTIONS
-  actionsColumn: { alignItems: 'center', justifyContent: 'center', marginLeft: 5 },
-  actionBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F2F2F7', alignItems: 'center', justifyContent: 'center' },
+  introSection: { marginBottom: 30 },
+  sectionHeaderTitle: { fontSize: 24, fontWeight: '800', color: '#1A1A1A' },
+  sectionHeaderSub: { fontSize: 14, color: '#888', marginTop: 4 },
 
-  // BOUTON AJOUTER
-  addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderWidth: 1, borderColor: '#00D668', borderRadius: 12, borderStyle: 'dashed', marginTop: 5 },
-  addBtnText: { color: '#00D668', fontWeight: 'bold', marginLeft: 8, fontSize: 14 },
+  // TIMELINE & CARDS
+  daySection: { marginBottom: 30 },
+  dayHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+  dayBadge: { backgroundColor: '#1A1A1A', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, marginRight: 10 },
+  dayBadgeText: { color: '#fff', fontWeight: '900', fontSize: 14 },
+  dayTitleLabel: { fontSize: 18, fontWeight: 'bold', color: '#1A1A1A' },
 
-  // FOOTER & MODALS (Styles Standards)
-  footer: { position: 'absolute', bottom: 30, left: 20, right: 20 },
-  bookButton: { backgroundColor: '#1A1A1A', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 18, borderRadius: 25, gap: 10, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 10, elevation: 5 },
-  bookText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
-  modalContent: { width: '85%', backgroundColor: '#fff', borderRadius: 25, padding: 25, alignItems: 'center' },
-  editCardModal: { width: '90%', backgroundColor: '#fff', borderRadius: 20, padding: 20 },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 20, color: '#1A1A1A', textAlign: 'center' },
-  label: { fontSize: 12, fontWeight: 'bold', color: '#8E8E93', marginBottom: 5, marginTop: 10 },
-  inputTitle: { backgroundColor: '#F2F2F7', borderRadius: 10, padding: 12, fontSize: 16, fontWeight: 'bold', color: '#1A1A1A' },
-  inputDesc: { backgroundColor: '#F2F2F7', borderRadius: 10, padding: 12, fontSize: 14, color: '#1A1A1A', textAlignVertical: 'top', minHeight: 80 },
-  modalButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 25 },
-  cancelBtnSmall: { flex: 1, padding: 15, alignItems: 'center', backgroundColor: '#F2F2F7', borderRadius: 12, marginRight: 10 },
-  saveBtnSmall: { flex: 1, padding: 15, alignItems: 'center', backgroundColor: '#00D668', borderRadius: 12 },
-  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 20, marginBottom: 30 },
-  plusMinusBtn: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#F2F2F7', alignItems: 'center', justifyContent: 'center' },
-  daysValue: { fontSize: 24, fontWeight: '900', color: '#1A1A1A' },
-  regenerateBtn: { backgroundColor: '#1A1A1A', width: '100%', paddingVertical: 15, borderRadius: 15, alignItems: 'center', marginBottom: 10 },
+  dayBody: { flexDirection: 'row' },
+  timelineLine: { width: 2, backgroundColor: '#E0E0E0', marginLeft: 16, marginRight: 20 },
+  activitiesList: { flex: 1 },
+
+  activityRow: { flexDirection: 'row', marginBottom: 24 },
+  timelineDot: { position: 'absolute', left: -25, top: 20, width: 12, height: 12, borderRadius: 6, backgroundColor: '#00D668', borderWidth: 2, borderColor: '#FAFAFA', zIndex: 10 },
+
+  activityCard: { flex: 1, backgroundColor: '#fff', borderRadius: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 4, overflow: 'hidden' },
+  cardImageContainer: { height: 140, width: '100%', position: 'relative' },
+  cardImage: { width: '100%', height: '100%' },
+  cardGradient: { ...StyleSheet.absoluteFillObject },
+  cardTitleOverImage: { position: 'absolute', bottom: 12, left: 15, right: 15, color: '#fff', fontSize: 18, fontWeight: 'bold', textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 4 },
+  dragBtn: { position: 'absolute', top: 10, right: 10, width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.3)', alignItems: 'center', justifyContent: 'center' },
+
+  cardContent: { padding: 16 },
+  cardDesc: { color: '#666', fontSize: 14, lineHeight: 20, marginBottom: 16 },
+  
+  actionBar: { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F0F0F0', paddingTop: 12 },
+  actionPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, marginRight: 8 },
+  actionText: { fontSize: 12, fontWeight: '600', color: '#333', marginLeft: 4 },
+  verticalDivider: { width: 1, height: 20, backgroundColor: '#E0E0E0', marginHorizontal: 2 },
+  deleteBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#FFF0F0', alignItems: 'center', justifyContent: 'center' },
+
+  // ADD BTN
+  addActivityBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 0, paddingVertical: 10 },
+  addIconCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center', marginRight: 12, marginLeft: -50, borderWidth: 3, borderColor: '#FAFAFA', zIndex: 10 },
+  addText: { fontSize: 14, fontWeight: '700', color: '#888' },
+
+  // FOOTER
+  floatingFooter: { position: 'absolute', bottom: 30, left: 20, right: 20, borderRadius: 24, overflow: 'hidden' },
+  validateBtn: { backgroundColor: '#1A1A1A', paddingVertical: 16, paddingHorizontal: 20, borderRadius: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: "#000", shadowOffset: {width: 0, height: 5}, shadowOpacity: 0.3, shadowRadius: 10 },
+  validateBtnDisabled: { opacity: 0.7 },
+  validateText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginLeft: 10 },
+  validateIconBox: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+
+  // MODALS
+  modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)', padding: 20 },
+  modalContent: { width: '100%', backgroundColor: '#fff', borderRadius: 24, padding: 24, alignItems: 'center', shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 20 },
+  modalTitle: { fontSize: 20, fontWeight: '800', marginBottom: 24, color: '#1A1A1A' },
+  counterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 30, gap: 20 },
+  counterBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
+  counterValue: { fontSize: 32, fontWeight: '900', color: '#1A1A1A', minWidth: 60, textAlign: 'center' },
+  regenerateBtn: { flexDirection: 'row', backgroundColor: '#00D668', paddingVertical: 14, paddingHorizontal: 24, borderRadius: 16, marginBottom: 16, width: '100%', justifyContent: 'center', alignItems: 'center' },
   regenerateText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  cancelText: { color: '#8E8E93', fontWeight: '600', padding: 10 }
+  closeModalBtn: { padding: 12 },
+  closeModalText: { color: '#888', fontWeight: '600' },
+
+  editModalCard: { width: '100%', backgroundColor: '#fff', borderRadius: 24, padding: 24 },
+  editHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  editTitle: { fontSize: 20, fontWeight: '800', color: '#1A1A1A' },
+  inputLabel: { fontSize: 12, fontWeight: '700', color: '#888', marginBottom: 6, textTransform: 'uppercase' },
+  inputField: { backgroundColor: '#F5F5F5', borderRadius: 12, padding: 14, fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 20 },
+  textArea: { minHeight: 100 },
+  saveEditBtn: { backgroundColor: '#1A1A1A', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
+  saveEditText: { color: '#fff', fontWeight: 'bold', fontSize: 16 }
 });
 
 export default GeneratedTripScreen;

@@ -1,8 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Dimensions, KeyboardAvoidingView, Platform, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Dimensions, KeyboardAvoidingView, Platform, Image, Alert, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
+import client from '../api/client';
 import { generateTrip } from '../utils/TripGenerator'; 
+import DateTimePicker from '@react-native-community/datetimepicker'; 
+import { LinearGradient } from 'expo-linear-gradient'; 
 
 const { width } = Dimensions.get('window');
 
@@ -38,42 +42,65 @@ const CreateTripScreen = ({ navigation }) => {
   // --- DONNÉES MANUELLES ---
   const [manualDest, setManualDest] = useState('');
   const [manualDays, setManualDays] = useState(3);
-
-  // --- LOGIQUE IA ---
-  const toggleVibe = (id) => {
-    if (selectedVibes.includes(id)) {
-      setSelectedVibes(selectedVibes.filter(v => v !== id));
-    } else {
-      if (selectedVibes.length < 3) setSelectedVibes([...selectedVibes, id]);
-    }
+  const [manualBudget, setManualBudget] = useState('');
+  const [manualImage, setManualImage] = useState(null);
+  
+  // Date
+  const [manualStartDate, setManualStartDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  
+  const onChangeDate = (event, selectedDate) => {
+    const currentDate = selectedDate || manualStartDate;
+    setShowDatePicker(Platform.OS === 'ios'); // Sur Android ça ferme auto
+    setManualStartDate(currentDate);
   };
 
-  const handleNextIA = () => {
-    if (step < STEPS_IA.length) {
-      setStep(step + 1);
-    } else {
-      // FIN DU QUIZ -> GÉNÉRATION
-      setIsGenerating(true);
-      setTimeout(() => {
-        const safeBudget = selectedBudget || { id: 'standard', label: 'Standard' };
-        const generatedData = generateTrip(selectedVibes, days, travelers, safeBudget);
+  const pickImage = async () => {
+   // ... (unchanged)
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission refusée', 'Besoin d\'accès à la galerie.');
+      return;
+    }
+
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.7,
+    });
+
+    if (!result.canceled) {
+        const localUri = result.assets[0].uri;
+        setManualImage(localUri);
         
-        setIsGenerating(false);
-        navigation.replace('GeneratedTrip', {
-          aiData: generatedData,
-          vibes: selectedVibes,
-          days: days,
-          travelers: travelers,
-          budget: safeBudget
+        const formData = new FormData();
+        formData.append('image', {
+            uri: localUri,
+            name: 'manual_trip.jpg',
+            type: 'image/jpeg',
         });
-      }, 1500);
+
+        try {
+            const response = await client.post('/upload', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            const baseUrl = client.defaults.baseURL.replace('/api', ''); 
+            const serverImageUrl = baseUrl + response.data.imageUrl;
+            setManualImage(serverImageUrl);
+        } catch (error) {
+            console.error("Upload error:", error);
+            Alert.alert("Erreur", "Echec de l'upload.");
+        }
     }
   };
+
+  // ... 
 
   // --- LOGIQUE MANUELLE ---
   const handleCreateManual = () => {
     if (manualDest.trim() === '') {
-      alert("Il faut au moins un nom de destination !");
+      Alert.alert("Oups", "Il faut au moins un nom de destination !");
       return;
     }
 
@@ -83,10 +110,11 @@ const CreateTripScreen = ({ navigation }) => {
       // On crée un objet "Voyage Vide"
       const blankTrip = {
         destination: manualDest,
-        // Image par défaut (Carte du monde)
-        image: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1', 
-        priceEstimate: 'À définir',
+        // Image personnalisée ou par défaut
+        image: manualImage || 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1', 
+        priceEstimate: manualBudget ? `${manualBudget} €` : 'À définir',
         destinationId: 'manual',
+        startDate: manualStartDate.toISOString(), // Ajout date
         days: Array.from({ length: manualDays }, (_, i) => ({
           day: i + 1,
           title: `Jour ${i + 1}`,
@@ -103,7 +131,8 @@ const CreateTripScreen = ({ navigation }) => {
         vibes: ['custom'],
         days: manualDays,
         travelers: 1,
-        budget: { label: 'Perso' }
+        budget: { label: manualBudget ? `${manualBudget} €` : 'Perso' },
+        startDate: manualStartDate.toISOString(), // Ajout date aux params
       });
     }, 1000);
   };
@@ -147,41 +176,131 @@ const CreateTripScreen = ({ navigation }) => {
       </TouchableOpacity>
     </View>
   );
-
   // --- RENDU : FORMULAIRE MANUEL ---
   const renderManualForm = () => (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{flex:1}}>
-      <Text style={styles.stepTitle}>À toi de jouer ✍️</Text>
-      
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>Où veux-tu aller ?</Text>
-        <TextInput 
-          style={styles.input} 
-          placeholder="Ex: Roadtrip en Italie..." 
-          value={manualDest}
-          onChangeText={setManualDest}
-          autoFocus
-        />
-      </View>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{flexGrow: 1, paddingBottom: 100}}>
+        
+        {/* HERO IMAGE SECTION */}
+        <TouchableOpacity 
+          onPress={pickImage} 
+          style={styles.heroContainer}
+          activeOpacity={0.9}
+        >
+          {manualImage ? (
+             <Image source={{ uri: manualImage }} style={styles.heroImage} resizeMode="cover" />
+          ) : (
+             <LinearGradient colors={['#F0F0F0', '#E0E0E0']} style={[styles.heroImage, {justifyContent: 'center', alignItems: 'center'}]}>
+                <Ionicons name="camera" size={40} color="#ccc" />
+                <Text style={styles.addPhotoText}>Ajouter une photo</Text>
+             </LinearGradient>
+          )}
+          
+          <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.heroOverlay} />
+          
+          <View style={styles.heroContent}>
+              <Text style={styles.heroTitle}>{manualDest || "Nouveau Voyage"}</Text>
+              <Text style={styles.heroSubtitle}>Créez votre propre aventure 🌍</Text>
+          </View>
 
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>Combien de jours ?</Text>
-        <View style={styles.row}>
-          <TouchableOpacity onPress={() => setManualDays(Math.max(1, manualDays - 1))} style={styles.roundBtn}>
-            <Ionicons name="remove" size={24} />
-          </TouchableOpacity>
-          <Text style={styles.bigNumber}>{manualDays} j</Text>
-          <TouchableOpacity onPress={() => setManualDays(manualDays + 1)} style={styles.roundBtn}>
-            <Ionicons name="add" size={24} />
-          </TouchableOpacity>
+          <View style={styles.editBadge}>
+              <Ionicons name="pencil" size={16} color="#fff" />
+          </View>
+        </TouchableOpacity>
+
+        {/* FORMULAIRE FLOTTANT */}
+        <View style={styles.formSection}>
+            
+            {/* Input Destination */}
+            <View style={styles.modernInputCard}>
+                <View style={styles.iconCircle}>
+                    <Ionicons name="location" size={22} color="#00D668" />
+                </View>
+                <View style={{flex:1}}>
+                    <Text style={styles.inputLabelSm}>Destination</Text>
+                    <TextInput 
+                        style={styles.modernInput} 
+                        placeholder="Ex: Roadtrip en Italie..." 
+                        placeholderTextColor="#ccc"
+                        value={manualDest}
+                        onChangeText={setManualDest}
+                    />
+                </View>
+            </View>
+
+            {/* Row: Date + Durée */}
+            <View style={styles.rowContainer}>
+                {/* Date */}
+                <TouchableOpacity onPress={() => setShowDatePicker(true)} style={[styles.modernInputCard, {flex: 1, marginRight: 8}]}>
+                    <View style={{marginBottom: 4}}>
+                         <Text style={styles.inputLabelSm}>Départ</Text>
+                    </View>
+                    <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                        <Ionicons name="calendar-outline" size={20} color="#1A1A1A" style={{marginRight: 8}} />
+                        <Text style={styles.valueText}>
+                            {manualStartDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+                        </Text>
+                    </View>
+                </TouchableOpacity>
+
+                {/* Durée */}
+                <View style={[styles.modernInputCard, {flex: 1, marginLeft: 8}]}>
+                    <View style={{marginBottom: 4}}>
+                         <Text style={styles.inputLabelSm}>Durée</Text>
+                    </View>
+                    <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
+                        <TouchableOpacity onPress={() => setManualDays(Math.max(1, manualDays - 1))} style={styles.miniBtn}>
+                             <Ionicons name="remove" size={16} color="#1A1A1A" />
+                        </TouchableOpacity>
+                        <Text style={styles.valueText}>{manualDays} j</Text>
+                        <TouchableOpacity onPress={() => setManualDays(manualDays + 1)} style={styles.miniBtn}>
+                             <Ionicons name="add" size={16} color="#1A1A1A" />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+
+            {showDatePicker && (
+                <DateTimePicker
+                value={manualStartDate}
+                mode="date"
+                display="default"
+                onChange={onChangeDate}
+                minimumDate={new Date()}
+                />
+            )}
+  
+            {/* Budget */}
+            <View style={styles.modernInputCard}>
+                <View style={styles.iconCircle}>
+                    <Ionicons name="wallet" size={22} color="#00D668" />
+                </View>
+                <View style={{flex:1}}>
+                    <Text style={styles.inputLabelSm}>Budget Global (€)</Text>
+                    <TextInput 
+                        style={styles.modernInput} 
+                        placeholder="Ex: 1500" 
+                        placeholderTextColor="#ccc"
+                        value={manualBudget} 
+                        onChangeText={setManualBudget} 
+                        keyboardType="numeric"
+                    />
+                </View>
+            </View>
+
         </View>
+        
+        <View style={{height: 100}} /> 
+      </ScrollView>
+
+      {/* FOOTER ACTION */}
+      <View style={styles.floatingFooter}>
+        <TouchableOpacity style={styles.createBtn} onPress={handleCreateManual}>
+          <Text style={styles.createBtnText}>Lancer la création</Text>
+          <Ionicons name="arrow-forward" size={20} color="#fff" />
+        </TouchableOpacity>
       </View>
 
-      <View style={{flex:1}} /> 
-      
-      <TouchableOpacity style={styles.nextBtn} onPress={handleCreateManual}>
-        <Text style={styles.nextText}>Créer mon voyage</Text>
-      </TouchableOpacity>
     </KeyboardAvoidingView>
   );
 
@@ -345,6 +464,48 @@ const styles = StyleSheet.create({
   activeBudget: { borderColor: '#00D668', backgroundColor: '#F0FFF4' },
   budgetLabel: { fontSize: 18, fontWeight: 'bold' },
   budgetDesc: { color: '#666' },
+  
+  dateBtn: {
+      flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 20, 
+      borderRadius: 15, borderWidth: 1, borderColor: '#eee', gap: 10
+  },
+  dateText: { fontSize: 16, color: '#1A1A1A', fontWeight: '500', textTransform: 'capitalize' },
+  // Nouveau Design Styles
+  heroContainer: {
+     height: 380, width: '100%', position: 'relative',
+     borderBottomLeftRadius: 32, borderBottomRightRadius: 32,
+     overflow: 'hidden', backgroundColor: '#eee',
+     marginBottom: 20
+  },
+  heroImage: { width: '100%', height: '100%' },
+  heroOverlay: { ...StyleSheet.absoluteFillObject },
+  addPhotoText: { marginTop: 10, color: '#888', fontWeight: 'bold' },
+  heroContent: { position: 'absolute', bottom: 40, left: 25, right: 25 },
+  heroTitle: { fontSize: 32, fontWeight: '900', color: '#fff', textShadowColor: 'rgba(0,0,0,0.3)', textShadowRadius: 10 },
+  heroSubtitle: { fontSize: 16, color: 'rgba(255,255,255,0.9)', marginTop: 5 },
+  editBadge: { position: 'absolute', top: 50, right: 20, backgroundColor: 'rgba(0,0,0,0.5)', padding: 10, borderRadius: 20 },
+  
+  formSection: { paddingHorizontal: 20, marginTop: -30 },
+  modernInputCard: {
+     flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 20,
+     padding: 15, marginBottom: 15,
+     shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 3
+  },
+  iconCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#E8F5E9', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
+  inputLabelSm: { fontSize: 10, fontWeight: 'bold', color: '#888', textTransform: 'uppercase', marginBottom: 2 },
+  modernInput: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', padding: 0 },
+  
+  rowContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 0 },
+  valueText: { fontSize: 18, fontWeight: 'bold', color: '#1A1A1A' },
+  miniBtn: { height: 32, backgroundColor: '#F0F0F0', borderRadius: 16, justifyContent: 'center', alignItems: 'center', width: 32 },
+
+  floatingFooter: { position: 'absolute', bottom: 30, left: 20, right: 20 },
+  createBtn: {
+      backgroundColor: '#1A1A1A', paddingVertical: 18, borderRadius: 24,
+      flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10,
+      shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 10
+  },
+  createBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' }
 });
 
 export default CreateTripScreen;

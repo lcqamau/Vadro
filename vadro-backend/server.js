@@ -1,5 +1,7 @@
 const express = require('express');
+const path = require('path');
 const dotenv = require('dotenv');
+const uploadRoutes = require('./src/routes/uploadRoutes');
 const tripRoutes = require('./src/routes/tripRoutes'); // Import des routes
 const userRoutes = require('./src/routes/userRoutes');
 const { stepRouter } = require('./src/routes/stepRoutes');
@@ -19,6 +21,9 @@ app.use('/api/users', userRoutes);
 app.use('/api/steps', stepRouter);
 app.use('/api/reviews', reviewRouter);
 app.use('/api/favorites', favoriteRoutes);
+app.use('/api/upload', uploadRoutes);
+
+app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
 
 // Route de test simple
