@@ -1,8 +1,9 @@
 import axios from 'axios';
+import { API_ip } from '@env';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const apiClient = axios.create({
-  baseURL: 'http://192.168.1.48:3000/api', // Mets ton IP locale ici
+  baseURL: API_ip,
 });
 
 // L'INTERCEPTEUR : C'est lui qui ajoute le Token automatiquement
