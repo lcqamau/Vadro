@@ -93,6 +93,7 @@ const getAllTrips = async (req, res) => {
 
     const trips = await prisma.trip.findMany({
       where: whereClause,
+      take: 50, // Limite de résultats anti-DDoS/lenteur
       include: { 
         author: true,
         steps: {
@@ -310,6 +311,7 @@ const getTripsByUser = async (req, res) => {
 
     const trips = await prisma.trip.findMany({
       where: whereClause,
+      take: 50, // Limite max de résultats retournés
       include: {
         author: true,
       },

@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import apiClient from '../api/client'; // Ton client Axios
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 45) / 2;
@@ -18,7 +18,7 @@ const FavoritesScreen = () => {
 
   // Fonction pour charger les favoris
   const fetchFavorites = async () => {
-    const token = await AsyncStorage.getItem('userToken');
+    const token = await SecureStore.getItemAsync('userToken');
 
     if (!token) {
       navigation.replace('Login');

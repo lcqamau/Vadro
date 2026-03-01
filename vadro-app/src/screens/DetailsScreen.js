@@ -5,7 +5,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import client from '../api/client'; // Ton client sécurisé
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { useFavorites } from '../context/FavoritesContext';
 
 const { width, height } = Dimensions.get('window');

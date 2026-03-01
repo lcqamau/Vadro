@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import client from '../api/client';
 import { Alert } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -13,7 +13,7 @@ export const FavoritesProvider = ({ children }) => {
   // Charger les favoris au démarrage
   const fetchFavorites = useCallback(async () => {
     try {
-      const token = await AsyncStorage.getItem('userToken');
+      const token = await SecureStore.getItemAsync('userToken');
       if (!token) {
         setLoading(false);
         return; 
@@ -62,7 +62,7 @@ export const FavoritesProvider = ({ children }) => {
     });
 
     try {
-      const token = await AsyncStorage.getItem('userToken');
+      const token = await SecureStore.getItemAsync('userToken');
       if (!token) {
         // Rollback si pas connecté
         Alert.alert("Connectez-vous", "Vous devez être connecté pour ajouter des favoris.");

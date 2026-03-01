@@ -16,10 +16,16 @@ const storage = multer.diskStorage({
 
 // Filtre pour n'accepter que les images
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image/')) {
+  const allowedExtensions = /jpeg|jpg|png|webp|gif/;
+  const allowedMimetypes = /image\/jpeg|image\/jpg|image\/png|image\/webp|image\/gif/;
+
+  const extname = allowedExtensions.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedMimetypes.test(file.mimetype);
+
+  if (extname && mimetype) {
     cb(null, true);
   } else {
-    cb(new Error('Le fichier doit être une image'), false);
+    cb(new Error('Erreur: Le fichier doit être une image valide (.jpg, .png, .webp, .gif)'), false);
   }
 };
 

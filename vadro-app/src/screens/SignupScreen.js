@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Pour stocker le token
+import * as SecureStore from 'expo-secure-store'; // Pour stocker le token
 import apiClient from '../api/client';
 
 const SignupScreen = ({ navigation }) => {
@@ -28,7 +28,7 @@ const SignupScreen = ({ navigation }) => {
 
       if (response.data.token) {
         // Sauvegarde du token JWT généré
-        await AsyncStorage.setItem('userToken', response.data.token);
+        await SecureStore.setItemAsync('userToken', response.data.token);
         navigation.replace('Main');
       }
     } catch (error) {

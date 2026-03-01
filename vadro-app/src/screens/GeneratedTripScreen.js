@@ -8,7 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { generateTrip, getAlternativeActivity, generateDayPlan } from '../utils/TripGenerator';
 import client from '../api/client';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 const { width, height } = Dimensions.get('window');
 const HEADER_HEIGHT = height * 0.4;
@@ -104,7 +104,7 @@ const GeneratedTripScreen = ({ route, navigation }) => {
   const handleSaveTrip = async () => {
       setIsSaving(true);
       try {
-          const token = await AsyncStorage.getItem('userToken');
+          const token = await SecureStore.getItemAsync('userToken');
           if (!token) {
               Alert.alert("Connexion requise", "Connectez-vous pour sauvegarder votre voyage.");
               setIsSaving(false);

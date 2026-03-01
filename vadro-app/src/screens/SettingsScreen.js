@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 const SettingsScreen = ({ navigation, route }) => {
   const { user } = route.params || {};
@@ -13,7 +13,7 @@ const SettingsScreen = ({ navigation, route }) => {
       { 
         text: "Oui", 
         onPress: async () => {
-          await AsyncStorage.removeItem('userToken');
+          await SecureStore.deleteItemAsync('userToken');
           navigation.replace('Login'); // Redirige vers le Login
         } 
       }

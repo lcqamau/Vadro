@@ -3,3 +3,7 @@ node_modules
 .env
 
 /generated/prisma
+
+# Sécurité & RGPD: Ne pas commit les uploads utilisateurs
+public/uploads/*
+!public/uploads/.gitkeep

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, FlatList, StatusBar, Dimensio
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import apiClient from '../api/client';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
@@ -31,7 +31,7 @@ const ProfileScreen = ({ route }) => {
   const fetchProfileData = async () => {
     try {
       setLoading(true);
-      const token = await AsyncStorage.getItem('userToken');
+      const token = await SecureStore.getItemAsync('userToken');
 
       if (isMe) {
           // --- MON PROFIL ---
@@ -55,7 +55,7 @@ const ProfileScreen = ({ route }) => {
 
     } catch (error) {
       if (isMe && error.response?.status === 401) {
-        await AsyncStorage.removeItem('userToken');
+        await SecureStore.deleteItemAsync('userToken');
         navigation.replace('Login');
       } else {
         console.error("Erreur profil:", error);
@@ -76,7 +76,7 @@ const ProfileScreen = ({ route }) => {
           text: "Oui, déconnexion", 
           style: "destructive", 
           onPress: async () => {
-            await AsyncStorage.removeItem('userToken');
+            await SecureStore.deleteItemAsync('userToken');
             navigation.replace('Login');
           } 
         }

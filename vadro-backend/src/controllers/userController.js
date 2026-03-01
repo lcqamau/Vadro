@@ -14,6 +14,12 @@ const registerUser = async (req, res) => {
     return res.status(400).json({ message: 'Please add all fields' });
   }
 
+  // Regex de validation d'email simple
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ message: 'Le format de l\'email est invalide' });
+  }
+
   try {
     // Check if user exists
     const userExists = await prisma.user.findUnique({
@@ -26,8 +32,8 @@ const registerUser = async (req, res) => {
       return res.status(400).json({ message: 'User already exists' });
     }
 
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
+    // Hash password (Salt rounds augmenté à 12 pour + de sécurité)
+    const salt = await bcrypt.genSalt(12);
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // Create user

@@ -1,12 +1,12 @@
 import apiClient from './client';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 export const register = async (username, email, password) => {
   try {
     // Appelle la route de ton controller
     const response = await apiClient.post('/users/register', { username, email, password });
     if (response.data.token) {
-      await AsyncStorage.setItem('userToken', response.data.token);
+      await SecureStore.setItemAsync('userToken', response.data.token);
     }
     return response.data;
   } catch (error) {
@@ -19,8 +19,8 @@ export const login = async (email, password) => {
     const response = await apiClient.post('/users/login', { email, password });
     if (response.data.token) {
       // On stocke le badge d'accès pour les prochaines requêtes
-      await AsyncStorage.setItem('userToken', response.data.token);
-      await AsyncStorage.setItem('userData', JSON.stringify(response.data));
+      await SecureStore.setItemAsync('userToken', response.data.token);
+      await SecureStore.setItemAsync('userData', JSON.stringify(response.data));
     }
     return response.data;
   } catch (error) {
@@ -29,6 +29,6 @@ export const login = async (email, password) => {
 };
 
 export const logout = async () => {
-  await AsyncStorage.removeItem('userToken');
-  await AsyncStorage.removeItem('userData');
+  await SecureStore.deleteItemAsync('userToken');
+  await SecureStore.deleteItemAsync('userData');
 };

@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { NavigationContainer } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 // Import de tes écrans
 import TabNavigator from './TabNavigator';
@@ -34,7 +34,7 @@ const AppNavigator = () => {
     // Vérifie si un jeton de connexion existe déjà
     const checkToken = async () => {
       try {
-        const token = await AsyncStorage.getItem('userToken');
+        const token = await SecureStore.getItemAsync('userToken');
         setUserToken(token);
       } catch (e) {
         console.error("Erreur lecture token", e);

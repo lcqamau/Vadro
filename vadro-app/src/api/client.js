@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { API_ip } from '@env';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 const apiClient = axios.create({
   baseURL: API_ip,
@@ -8,7 +8,7 @@ const apiClient = axios.create({
 
 // L'INTERCEPTEUR : C'est lui qui ajoute le Token automatiquement
 apiClient.interceptors.request.use(async (config) => {
-  const token = await AsyncStorage.getItem('userToken');
+  const token = await SecureStore.getItemAsync('userToken');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
