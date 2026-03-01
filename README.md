@@ -50,9 +50,9 @@ La plupart des applications de voyage se contentent de lister des lieux. Vadro v
 
 ## 📱 Captures d'écran
 
-| Accueil (Explorer) | Détails du Voyage | Itinéraire & Carte |
+| Accueil (Explorer) | Détails du Voyage | Itinéraire & Carte | Création de voyage | Profile
 | :---: | :---: | :---: |
-| <img src="https://via.placeholder.com/250x500.png?text=Home+Screen" width="250"/> | <img src="https://via.placeholder.com/250x500.png?text=Trip+Details" width="250"/> | <img src="https://via.placeholder.com/250x500.png?text=Map+%26+Timeline" width="250"/> |
+| ![alt text](image.png) | ![alt text](image-1.png) |  |![alt text](image-2.png) | ![alt text](image-3.png)
 
 > *Ajoutez les vrais screenshots de l'application ici pour plus d'impact.*
 
